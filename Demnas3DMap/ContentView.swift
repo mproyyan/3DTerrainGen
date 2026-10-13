@@ -1,24 +1,8 @@
-//
-//  ContentView.swift
-//  Demnas3DMap
-//
-//  Created by Muhammad Pandu Royyan on 12/10/26.
-//
-
 import SwiftUI
 
 struct ContentView: View {
+    @State private var session = TerrainSession()
     var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
-        }
-        .padding()
+        TerrainMapView(session: session)
     }
-}
-
-#Preview {
-    ContentView()
 }
