@@ -13,6 +13,12 @@ struct TerrainMapView: View {
     @State private var selectedPoint: CPTPoint?
     @State private var resetConfirmation = false
 
+    // QGIS-style: import without CRS then pick CRS
+    @State private var showImporterForManualCRS = false
+    @State private var showCRSSelectionSheet = false
+    @State private var selectedCRSForImport: Int = 4326
+    @State private var customCRSText: String = ""
+
     var body: some View {
         NavigationStack {
             MapReader { proxy in
@@ -77,6 +83,7 @@ struct TerrainMapView: View {
             .sheet(isPresented:$showImportOptions,onDismiss: {
                 if chooseFilesAfterDismiss { chooseFilesAfterDismiss = false; showImporter = true }
             }) { importOptions }
+            .sheet(isPresented: $showCRSSelectionSheet) { crsSelectionSheet }
             .sheet(isPresented: $showInvestigation) { CPTWorkspaceView(session: session) }
             .sheet(item: $selectedPoint) { point in
                 NavigationStack {
