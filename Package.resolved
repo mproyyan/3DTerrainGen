@@ -1,0 +1,15 @@
+{
+  "originHash" : "7ddbe4b28d5f4a504f37aa48a6bf44f8987d4656b232eee3827342d645ff7910",
+  "pins" : [
+    {
+      "identity" : "coordinate-reference-systems-ios",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/ngageoint/coordinate-reference-systems-ios.git",
+      "state" : {
+        "revision" : "d0d8cd34710aa78adb1bef3cdb2bf09a18356fa0",
+        "version" : "2.0.0"
+      }
+    }
+  ],
+  "version" : 3
+}
