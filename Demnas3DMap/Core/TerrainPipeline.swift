@@ -135,7 +135,7 @@ enum RasterClippingService {
     }
 }
 
-struct TerrainMesh: Sendable {
+struct TerrainMesh: Codable, Sendable {
     let positions: [SIMD3<Float>]
     let normals: [SIMD3<Float>]
     let indices: [UInt32]

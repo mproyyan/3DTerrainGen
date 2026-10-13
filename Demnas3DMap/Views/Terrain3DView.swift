@@ -4,42 +4,101 @@ import Combine
 
 struct Terrain3DView: View {
     let terrain: TerrainMesh
+    @Bindable var session: TerrainSession
     @State private var resource: MeshResource?
     @State private var failure: String?
     @State private var resetID = 0
     @State private var showDetails = false
     @State private var loader: AnyCancellable?
+    @State private var columns: [SubsurfaceColumn] = []
+    @State private var columnVersion = 0
+    @State private var displayMode = 1
+    @State private var depthScale: Float = 1
+    @State private var showInvestigation = false
+    @State private var buildingLayers = false
+    @State private var layerFailure: String?
 
     var body: some View {
         ZStack {
             Color(red:0.06,green:0.08,blue:0.1).ignoresSafeArea()
             if let resource {
-                TerrainRenderer(resource:resource,terrain:terrain,resetID:resetID)
-                    .ignoresSafeArea(edges:.bottom)
-                    .accessibilityLabel("3D terrain. Drag to orbit, pinch to zoom, and drag with two fingers to pan.")
+                GeometryReader { geometry in
+                    TerrainRenderer(resource:resource, terrain:terrain, points:session.points, recommendation:session.recommendation, columns:columns, columnVersion:columnVersion, displayMode:displayMode, depthScale:depthScale, resetID:resetID)
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .accessibilityLabel("3D terrain. Drag to orbit, pinch to zoom, and drag with two fingers to pan.")
+                }
             } else if let failure {
                 ContentUnavailableView("Unable to display terrain",systemImage:"exclamationmark.triangle",description:Text(failure))
             } else { ProgressView("Preparing terrain surface…").tint(.white).foregroundStyle(.white) }
         }
         .safeAreaInset(edge:.bottom) {
             VStack(spacing:6) {
+                if !session.points.isEmpty {
+                    HStack {
+                        Label("SIMULASI", systemImage: "flask.fill").font(.caption.bold()).foregroundStyle(.orange)
+                        Spacer()
+                        Button("Investigasi · \(session.status.completed)/\(session.status.target) CPT") { showInvestigation = true }
+                            .font(.caption.bold())
+                    }
+                    HStack {
+                        ForEach(Array(["Permukaan", "Lapisan", "Potongan"].enumerated()), id: \.offset) { index, title in
+                            Button { displayMode = index } label: { Text(title).frame(maxWidth: .infinity) }
+                                .buttonStyle(.borderedProminent).tint(displayMode == index ? .teal : .gray.opacity(0.3))
+                                .accessibilityAddTraits(displayMode == index ? .isSelected : [])
+                        }
+                    }.font(.caption)
+                    HStack {
+                        ForEach(SoilBehavior.allCases, id: \.self) { behavior in
+                            Label { Text(behavior.title) } icon: { Circle().fill(behavior.color).frame(width: 8, height: 8) }
+                        }
+                        Label { Text("Belum pasti") } icon: { Circle().fill(.gray).frame(width: 8, height: 8) }
+                    }.font(.system(size: 10))
+                    HStack {
+                        Text("Skala depth").font(.caption)
+                        ForEach([1,5,10], id: \.self) { scale in
+                            Button { depthScale = Float(scale) } label: { Text("\(scale)×").frame(maxWidth: .infinity) }
+                                .buttonStyle(.borderedProminent).tint(depthScale == Float(scale) ? .teal : .gray.opacity(0.3))
+                                .accessibilityLabel("Skala kedalaman \(scale) kali")
+                        }
+                    }
+                    Text("Kolom spasial mengikuti profil terdekat. Abu-abu: cakupan/kedalaman belum diketahui; celah tepi tidak dimodelkan.").font(.caption2).foregroundStyle(.secondary)
+                }
+                if buildingLayers { ProgressView("Memperbarui lapisan…").font(.caption) }
+                if let layerFailure { Text(layerFailure).font(.caption).foregroundStyle(.red) }
                 HStack {
                     Label("\(terrain.minimum, specifier:"%.1f")–\(terrain.maximum, specifier:"%.1f") m",systemImage:"mountain.2")
                     Spacer()
                     Text("\(terrain.areaSquareMeters/1_000_000, specifier:"%.3f") km²")
                 }.font(.subheadline.monospacedDigit())
                 Text("Drag: orbit · Pinch: zoom · Two-finger drag: pan").font(.caption)
-                Text("Vertical scale 1× · North is −Z").font(.caption2).foregroundStyle(.secondary)
+                Text("Elevasi terrain 1× · Depth \(Int(depthScale))× · Utara −Z").font(.caption2).foregroundStyle(.secondary)
             }.padding().background(.regularMaterial)
         }
         .navigationTitle("3D terrain").navigationBarTitleDisplayMode(.inline)
+        .preferredColorScheme(.dark)
+        .toolbarBackground(.visible, for: .navigationBar)
         .toolbar {
             ToolbarItemGroup(placement:.topBarTrailing) {
+                Button("Investigasi", systemImage: "list.bullet.clipboard") { showInvestigation = true }
                 Button("Reset camera",systemImage:"arrow.counterclockwise") { resetID += 1 }
                 Button("Terrain details",systemImage:"info.circle") { showDetails = true }
             }
         }
         .sheet(isPresented:$showDetails) { details }
+        .sheet(isPresented:$showInvestigation) { CPTWorkspaceView(session: session) }
+        .task(id: session.revision) {
+            buildingLayers = true; layerFailure = nil
+            let points = session.points, scenario = session.scenario
+            let boundary = session.selection.coordinates.map { GeoPoint($0) }
+            let job = Task.detached(priority: .userInitiated) {
+                try SubsurfaceModel.columns(terrain: terrain, boundary: boundary, points: points, scenario: scenario)
+            }
+            do {
+                let result = try await withTaskCancellationHandler { try await job.value } onCancel: { job.cancel() }
+                try Task.checkCancellation()
+                columns = result; columnVersion += 1; buildingLayers = false
+            } catch is CancellationError { } catch { layerFailure = error.localizedDescription; buildingLayers = false }
+        }
         .task {
             guard resource == nil, loader == nil else { return }
             var descriptor = MeshDescriptor(name:"DEMNAS terrain")
@@ -76,6 +135,12 @@ struct Terrain3DView: View {
 private struct TerrainRenderer: UIViewRepresentable {
     let resource: MeshResource
     let terrain: TerrainMesh
+    let points: [CPTPoint]
+    let recommendation: GeoPoint?
+    let columns: [SubsurfaceColumn]
+    let columnVersion: Int
+    let displayMode: Int
+    let depthScale: Float
     let resetID: Int
     func makeCoordinator() -> Coordinator { Coordinator() }
     func makeUIView(context: Context) -> ARView {
@@ -87,9 +152,13 @@ private struct TerrainRenderer: UIViewRepresentable {
         let model = ModelEntity(mesh:resource,materials:[material])
         let bounds = model.visualBounds(relativeTo:nil)
         let span = max(bounds.extents.x,bounds.extents.y,bounds.extents.z,1)
-        model.scale = .init(repeating:2/span)
-        model.position = -bounds.center * (2/span)
-        anchor.addChild(model)
+        context.coordinator.terrainModel = model
+        context.coordinator.root.addChild(model)
+        context.coordinator.root.addChild(context.coordinator.subsoil)
+        context.coordinator.root.addChild(context.coordinator.markers)
+        context.coordinator.root.scale = .init(repeating: 2/span)
+        context.coordinator.root.position = -bounds.center * (2/span)
+        anchor.addChild(context.coordinator.root)
         let light = DirectionalLight()
         light.light.intensity = 2500
         light.look(at:.zero,from:[-3,5,2],relativeTo:nil)
@@ -110,14 +179,62 @@ private struct TerrainRenderer: UIViewRepresentable {
         return view
     }
     func updateUIView(_ uiView: ARView,context:Context) {
+        let coordinator = context.coordinator
+        if coordinator.columnVersion != columnVersion || coordinator.depthScale != depthScale || coordinator.displayMode != displayMode || coordinator.pointIDs != points.map(\.id) || coordinator.recommendation != recommendation {
+            coordinator.columnVersion = columnVersion; coordinator.depthScale = depthScale; coordinator.displayMode = displayMode
+            coordinator.pointIDs = points.map(\.id); coordinator.recommendation = recommendation
+            coordinator.rebuild(terrain: terrain, columns: columns, points: points, recommendation: recommendation)
+        }
         if context.coordinator.resetID != resetID { context.coordinator.resetID = resetID; context.coordinator.reset() }
     }
     @MainActor final class Coordinator: NSObject {
         let camera = PerspectiveCamera()
+        let root = Entity()
+        let subsoil = Entity()
+        let markers = Entity()
+        var terrainModel: ModelEntity?
+        var columnVersion = -1
+        var depthScale: Float = 1
+        var displayMode = 1
+        var pointIDs: [UUID] = []
+        var recommendation: GeoPoint?
+        func rebuild(terrain: TerrainMesh, columns: [SubsurfaceColumn], points: [CPTPoint], recommendation: GeoPoint?) {
+            subsoil.children.removeAll(); markers.children.removeAll()
+            terrainModel?.isEnabled = displayMode == 0 || columns.isEmpty
+            let midX = ((terrain.positions.map(\.x).min() ?? 0) + (terrain.positions.map(\.x).max() ?? 0))/2
+            if displayMode != 0 {
+                for column in columns {
+                    if displayMode == 2 && !column.observed && column.surface.x > midX { continue }
+                    let height = Float(column.bottom-column.top)*depthScale
+                    let color: UIColor = column.behavior.map { UIColor($0.color) } ?? UIColor(white: 0.65, alpha: 0.16)
+                    let material = SimpleMaterial(color: color, roughness: 0.85, isMetallic: column.observed)
+                    let entity = ModelEntity(mesh: .generateBox(size: [column.width, height, column.length]), materials: [material])
+                    entity.position = column.surface - SIMD3<Float>(0, Float((column.top+column.bottom)/2)*depthScale, 0)
+                    subsoil.addChild(entity)
+                }
+            }
+            let minX = terrain.positions.map(\.x).min() ?? 0, maxX = terrain.positions.map(\.x).max() ?? 1
+            let minZ = terrain.positions.map(\.z).min() ?? 0, maxZ = terrain.positions.map(\.z).max() ?? 1
+            let markerRadius = max(0.4, max(maxX-minX, maxZ-minZ)*0.008)
+            func marker(_ geo: GeoPoint, _ color: UIColor, _ name: String) {
+                guard let surface = terrain.surfacePosition(at: geo) else { return }
+                let sphere = ModelEntity(mesh: .generateSphere(radius: markerRadius), materials: [SimpleMaterial(color: color, isMetallic: false)])
+                sphere.position = surface + SIMD3<Float>(0, markerRadius*1.5, 0)
+                sphere.name = name; markers.addChild(sphere)
+            }
+            for point in points { marker(point.coordinate, point.isComplete ? .systemGreen : .systemOrange, point.name) }
+            if let recommendation { marker(recommendation, .systemPink, "Rekomendasi simulasi") }
+            let maxDepth = Float(columns.map(\.bottom).max() ?? 0)*depthScale
+            let low = Float(terrain.minimum-terrain.elevationOrigin)-maxDepth
+            let high = Float(terrain.maximum-terrain.elevationOrigin)+Float(markerRadius*3)
+            let span = max(maxX-minX, maxZ-minZ, high-low, 1)
+            root.scale = .init(repeating: 2/span)
+            root.position = -SIMD3<Float>((minX+maxX)/2, (low+high)/2, (minZ+maxZ)/2)*(2/span)
+        }
         var resetID = 0
-        var yaw: Float = 0, pitch: Float = 0.8, distance: Float = 4
+        var yaw: Float = 0.45, pitch: Float = 0.45, distance: Float = 4
         var target = SIMD3<Float>.zero
-        func reset() { yaw = 0; pitch = 0.8; distance = 4; target = .zero; update() }
+        func reset() { yaw = 0.45; pitch = 0.45; distance = 4; target = .zero; update() }
         func update() {
             camera.camera.near = 0.001; camera.camera.far = 100
             let offset = SIMD3<Float>(sin(yaw)*cos(pitch),sin(pitch),cos(yaw)*cos(pitch))*distance

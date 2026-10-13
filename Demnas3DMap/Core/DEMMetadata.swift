@@ -1,7 +1,7 @@
 import Foundation
 import CoordinateReferenceSystems
 
-struct DEMMetadata: Sendable {
+struct DEMMetadata: Codable, Sendable {
     let width: Int, height: Int
     let transform: AffineTransform
     let epsg: Int

@@ -16,7 +16,7 @@ struct Point2: Sendable, Equatable {
     var length: Double { hypot(x, y) }
 }
 
-struct GeoPoint: Sendable, Equatable {
+struct GeoPoint: Codable, Sendable, Equatable {
     let longitude: Double
     let latitude: Double
     init(longitude: Double, latitude: Double) { self.longitude = longitude; self.latitude = latitude }

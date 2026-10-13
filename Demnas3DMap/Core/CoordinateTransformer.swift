@@ -1,6 +1,6 @@
 import Foundation
 
-struct AffineTransform: Sendable, Equatable {
+struct AffineTransform: Codable, Sendable, Equatable {
     // Coordinates refer to pixel corners; samples live at (column + .5, row + .5).
     let x0: Double, a: Double, b: Double, y0: Double, d: Double, e: Double
     var determinant: Double { a * e - b * d }
