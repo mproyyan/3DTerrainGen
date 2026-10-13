@@ -168,14 +168,19 @@ struct TerrainMapView: View {
         NavigationStack {
             Form {
                 Section {
-                    Text("Select the Coordinate Reference System (CRS) for this DEM. Raw DEMNAS tiles from Badan Informasi Geospasial (BIG) are in **WGS 84 Geographic (EPSG:4326)**.")
-                        .font(.subheadline)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Important for DEMNAS:")
+                            .font(.subheadline.bold())
+                        Text("Raw DEMNAS tiles downloaded directly from BIG (tanahair.indonesia.go.id) are always in **WGS 84 Geographic degrees (EPSG:4326)**, including tiles in Central Java, Yogyakarta, and Java.\n\nOnly select **UTM Zone 49S (EPSG:32749)** if you previously reprojected the raster coordinates to UTM meters.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 } header: {
                     Text("Coordinate Reference System Selector")
                 }
 
-                Section("Standard Geodetic (Lat/Long)") {
-                    crsRow(title: "WGS 84 (Geographic Lat/Lon)", code: 4326, description: "Degrees (Default for DEMNAS)")
+                Section("Standard Geodetic (Lat/Long) — Recommended for DEMNAS") {
+                    crsRow(title: "WGS 84 (Geographic Lat/Lon)", code: 4326, description: "Default for all raw DEMNAS tiles across Indonesia")
                     crsRow(title: "WGS 84 / Pseudo-Mercator", code: 3857, description: "Web Mercator (Meters)")
                 }
 

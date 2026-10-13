@@ -66,7 +66,15 @@ struct CoordinateTransformer: Sendable {
             let lon = (dd - (1+2*t+c)*pow(dd,3)/6 + (5-2*c+28*t-3*c*c+8*ep+24*t*t)*pow(dd,5)/120) / cos(fp)
             result = .init(longitude: Double(zone*6-183) + lon*180 / .pi, latitude: lat*180 / .pi)
         }
-        guard result.longitude.isFinite, result.latitude.isFinite, abs(result.longitude) <= 180, abs(result.latitude) <= 90 else { throw TerrainError("Raster bounds are inconsistent with the declared CRS.") }
+        guard result.longitude.isFinite, result.latitude.isFinite, abs(result.longitude) <= 180, abs(result.latitude) <= 90 else {
+            if epsg != 4326 && abs(world.x) <= 180 && abs(world.y) <= 90 {
+                throw TerrainError("Raster coordinates look like degrees (longitude: \(String(format: "%.4f", world.x)), latitude: \(String(format: "%.4f", world.y))), but EPSG:\(epsg) expects projected coordinates (meters). Official DEMNAS tiles are stored in WGS 84 Geographic (EPSG:4326). Please select EPSG:4326.")
+            } else if epsg == 4326 && (abs(world.x) > 180 || abs(world.y) > 90) {
+                throw TerrainError("Raster coordinates look like projected meters (X: \(String(format: "%.1f", world.x)), Y: \(String(format: "%.1f", world.y))), but EPSG:4326 expects geographic degrees (-180 to 180). Please select the appropriate UTM Zone CRS.")
+            } else {
+                throw TerrainError("Raster bounds (\(String(format: "%.2f", world.x)), \(String(format: "%.2f", world.y))) are inconsistent with EPSG:\(epsg). Check your CRS selection.")
+            }
+        }
         return result
     }
     /// WGS 84 ECEF projected onto the origin's east/north axes. Height is kept separately.
