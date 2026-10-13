@@ -82,3 +82,54 @@ Manual acceptance with a genuine DEMNAS tile remains necessary: draw a boundary 
 - [GDAL GeoTIFF driver](https://gdal.org/en/stable/drivers/raster/gtiff.html): format scope, NoData and metadata conventions.
 - [GDAL native build requirements](https://gdal.org/en/stable/development/building_from_source.html).
 - [Apple MapReader](https://developer.apple.com/documentation/mapkit/mapreader) and [MeshDescriptor](https://developer.apple.com/documentation/realitykit/meshdescriptor).
+
+## Sequential CPT proof of concept
+
+The terrain viewer now includes an on-device CPT investigation workflow. **DRL and SchemaGAN are not implemented.** Soil interpretations, spatial coverage, strengths, recommendations, and completion are explicitly presented as simulations; they are not validated geotechnical design results.
+
+1. Draw the boundary, import a DEM, and generate the terrain as before.
+2. Return to the map and choose **Tambah CPT**, then tap inside the terrain. Points must be at least 2 m apart (maximum 32). A point is saved immediately as waiting for field testing/data.
+3. Open the point and paste a CSV profile, import a UTF-8 CSV from Files, or choose **Isi contoh sintetis** for a labeled demonstration dataset.
+4. Review assumptions and choose **Simpan & generate lapisan**. Layer intervals, mean Ic, and applicable illustrative strengths appear beneath the editor.
+5. Open **3D** to inspect the surface, subsurface columns, or a half cutaway. Depth can be exaggerated 1×/5×/10× independently of terrain elevation; the selected scale remains visible.
+6. Open **Investigasi** to adopt the next simulated candidate, perform the field test, and submit its profile. The candidate is selected by maximum distance to existing CPTs among a bounded set of terrain triangle centroids, not by DRL or information gain. Field access is not evaluated.
+
+Choose the scenario in **Investigasi**, before submitting the first profile:
+
+- **Homogen · 1 CPT:** completion after one submitted profile; spatial extrapolation assumes lateral homogeneity.
+- **Bervariasi · 3 CPT:** completion after three submitted profiles. Before completion, the display uses a geometric support radius `sqrt(area) × (0.22 + 0.10 × (completed − 1))`. This is a demo coverage mask, not a probability or calibrated uncertainty measure.
+
+Pending points prevent completion and suppress additional automatic candidates. Editing results updates the interpretation and scene; deleting a point recomputes the state and can reopen the investigation. Additional manual points remain possible after scenario completion. If no candidate meets the spacing requirement, the UI explains that the scenario is incomplete.
+
+### Input and interpretation contract
+
+CSV header, in this exact order (header matching is case-insensitive):
+
+```csv
+depth_m,qc_mpa,fs_kpa,u2_kpa
+0.5,0.650,42.0,
+1.0,0.650,42.0,100
+2.0,0.700,45.0,120
+```
+
+Use comma delimiters, decimal points, and no quoted fields. The parser accepts CRLF/LF and UTF-8 BOM. It requires 2–5,000 rows, at most 1 MB, strictly increasing depths in `(0, 200]` m, and positive finite qc/fs. Missing u2 is allowed, including a mixed profile; finite negative u2 is retained. There is no automatic sorting, duplicate removal, or conversion of unspecified units.
+
+- qc in MPa is converted to kPa before `qt = qc + u2(1−a)`. A blank u2 uses `qt ≈ qc` and records that limitation.
+- Total stress uses a constant user-entered unit weight (default 18 kN/m³); equilibrium pressure is hydrostatic below the entered water table (default 2 m). The cone area ratio defaults to 0.8 and Nkt to 15. Invalid ranges and nonpositive normalization denominators are rejected.
+- Ic uses **Qt**, base-10 logarithms, and Fr in percent. Three illustrative behavior groups use Ic < 2.05 (sand-like), 2.05–2.6 (transitional), and ≥ 2.6 (clay-like). This does not reproduce every zone of the Robertson charts or use Qtn iteration.
+- Layer segmentation applies a median over up to three adjacent samples and merges runs thinner than 0.5 m. Boundaries between samples are midpoints. Layers span only the first through last measured depth; gaps > 1 m trigger a note. Thin layers may be lost, and boundaries require engineer review.
+- Clay-like samples use `su = (qt − σv0)/Nkt`. Sand-like samples use a deliberately illustrative **30/34/38° lookup**, not a claimed Kulhawy–Mayne correlation. Transitional samples have no strength estimate. Layer averages use only sample estimates that support the corresponding behavior; no statistical confidence interval is claimed.
+
+### Spatial model and persistence
+
+CPT surface elevations are sampled from the rendered DEM and retain its vertical datum. This PoC assumes vertical penetration and uses DEM ground elevation, not a surveyed CPT collar elevation. All subsurface objects share the terrain's local east/north frame and common display transform.
+
+The spatial visualization consists of a bounded 14 × 14 grid of columns. Each supported column extends the **nearest completed CPT profile relative to local ground depth**. It does not match geological horizons across CPTs or perform SchemaGAN interpolation. Cells crossing the polygon boundary or concave notches are omitted, leaving visible edge gaps. Gray translucent columns indicate unsupported spatial coverage or unmeasured depth; the depth below the deepest profile remains outside the displayed model. Narrow columns at actual CPT locations show their interpreted profiles. A half cutaway exposes the interior without changing any computed data.
+
+One project is saved atomically in the app's Application Support directory, including the polygon, terrain snapshot, CPT inputs, assumptions, data origin, derived profiles, scenario, and timestamps. Unapplied editor drafts are saved when the editor closes. The project restores on relaunch without the source TIFF; importing a new DEM requires starting a new area. **Area baru** asks before clearing the saved project. This is one local project, without cloud sync or project export.
+
+### Relationship to the research paper
+
+Based conceptually on Zuada Coelho, Smyrniou & Campos Montero, *Optimizing geotechnical in-situ site investigations using Deep Reinforcement Learning*, Geodata and AI 6 (2026), 100038, [DOI](https://doi.org/10.1016/j.geoai.2025.100038). The paper uses DQN to choose horizontal steps in synthetic 2D Ic sections and SchemaGAN for interpolation. Its episodes end at the profile boundary. Arbitrary polygon domains, this 3D visualization, strength estimates, and the count-based completion scenarios are PoC additions, not reproduced or validated results from that paper.
+
+PoC validation on 13 October 2026: all **21 core tests passed** (13 existing terrain tests plus 8 CPT/spatial/persistence tests), and unsigned iPhone and Simulator builds succeeded. Interactive QA on an isolated iOS 27 Simulator with synthetic terrain verified placing the first point, generating layers and behavior-specific strengths from the example CSV, the next-point recommendation, restoring the saved project on relaunch, and the 3D cutaway/depth controls. The full three-profile sequence is covered by core state tests; its final end-to-end UI rerun was not completed because automatic approval review hit a usage limit. Real CPT datasets, physical-device interaction, and geological accuracy remain unverified.
