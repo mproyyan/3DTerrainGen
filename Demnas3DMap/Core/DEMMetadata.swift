@@ -1,4 +1,5 @@
 import Foundation
+import CoordinateReferenceSystems
 
 struct DEMMetadata: Codable, Sendable {
     let width: Int, height: Int
@@ -81,7 +82,8 @@ struct CompanionMetadata: Sendable {
         guard size <= 1_000_000 else { throw TerrainError("Companion metadata exceeds 1 MB.") }
         return try String(contentsOf: url, encoding: .utf8)
     }
-    /// Accept an explicit identifier or a root WKT AUTHORITY/ID only, never a nested datum ID.
+
+    /// Accept an explicit identifier, a root WKT AUTHORITY/ID, or parse CRS WKT via CoordinateReferenceSystems.
     static func explicitEPSG(in text: String) throws -> Int {
         let s = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if s.uppercased().hasPrefix("EPSG:"), let code = Int(s.dropFirst(5)) { return code }
@@ -98,7 +100,47 @@ struct CompanionMetadata: Sendable {
             }
             if depth == 1, let code = Int(ns.substring(with: match.range(at: 1))) { return code }
         }
-        throw TerrainError("Companion CRS needs an explicit root EPSG identifier. An unnamed WKT datum cannot safely establish the raster CRS.")
+
+        // Process WKT using CoordinateReferenceSystems (crs-ios).
+        // Only attempt on WKT2-style keywords; legacy WKT1 can crash CRSReader with NSException.
+        let wkt2Prefixes = ["GEOGCRS[", "PROJCRS[", "GEODCRS[", "VERTCRS[", "COMPOUNDCRS[", "BOUNDCRS[",
+                            "GEOGCRS [", "PROJCRS [", "GEODCRS ["]
+        let upper = s.uppercased()
+        if wkt2Prefixes.contains(where: { upper.hasPrefix($0) }), let crsObj = CRSReader.read(s) {
+            // 1. Check if the parsed CRS object has an authority identifier (e.g. EPSG)
+            if crsObj.numIdentifiers() > 0 {
+                for i in 0..<crsObj.numIdentifiers() {
+                    let ident = crsObj.identifier(at: i)
+                    if let name = ident?.name, name.caseInsensitiveCompare("EPSG") == .orderedSame,
+                       let idStr = ident?.uniqueIdentifier, let code = Int(idStr) {
+                        return code
+                    }
+                }
+            }
+            // 2. Derive PROJ parameters using CRSProjParser to match supported projections
+            if let params = CRSProjParser.params(fromCRS: crsObj) {
+                let proj: String? = params.proj
+                let datum: String? = params.datum
+                let ellps: String? = params.ellps
+                let a: String? = params.a
+                let isWGS84 = datum?.caseInsensitiveCompare("WGS84") == .orderedSame
+                    || ellps?.caseInsensitiveCompare("WGS84") == .orderedSame
+                    || (a != nil && abs((Double(a!) ?? 0) - 6378137.0) < 1.0)
+                if (proj == "longlat" || proj == "latlong") && isWGS84 {
+                    return 4326
+                } else if (proj == "merc" || proj == "webmerc") && isWGS84 {
+                    return 3857
+                } else if proj == "utm" {
+                    let zoneOpt: String? = params.zone()
+                    if let zoneStr = zoneOpt, let zone = Int(zoneStr), (1...60).contains(zone), isWGS84 {
+                        let isSouth: Bool = params.south
+                        return isSouth ? (32700 + zone) : (32600 + zone)
+                    }
+                }
+            }
+        }
+
+        throw TerrainError("Companion CRS needs an explicit root EPSG identifier or recognizable WKT. An unnamed WKT datum cannot safely establish the raster CRS.")
     }
 }
 
@@ -119,7 +161,8 @@ enum DEMMetadataValidator {
             return (u-v).length < max(1e-10, min(hypot(a.a,a.d), hypot(a.b,a.e))*1e-5)
         }
     }
-    static func validate(_ reader: TIFFReader, companion: CompanionMetadata, confirmedDEMNAS: Bool) throws -> DEMMetadata {
+    static func validate(_ reader: TIFFReader, companion: CompanionMetadata,
+                         confirmedDEMNAS: Bool, manualEPSG: Int? = nil) throws -> DEMMetadata {
         var keys: [Int:Int] = [:]
         if reader.tags[34735] != nil {
             let v = try reader.integers(34735)
@@ -136,13 +179,39 @@ enum DEMMetadataValidator {
         } else if keys[3072] != nil { epsg = keys[3072] }
         else { epsg = keys[2048] }
         if epsg == 32767 || epsg == 0 { epsg = nil }
-        if let embedded = epsg, let sidecar = companion.epsg, embedded != sidecar { throw TerrainError("Embedded and companion CRS identifiers conflict.") }
+
         var provenance = [String]()
-        if epsg == nil { epsg = companion.epsg; if epsg != nil { provenance.append("CRS assigned from companion metadata; sample coordinates were not reprojected.") } }
-        guard let epsg else { throw TerrainError("The raster CRS is missing. Select a matching .prj or .tif.aux.xml with authoritative CRS metadata alongside the TIFF. Geographic-looking values and the DEMNAS filename are not sufficient to assign EPSG:4326.") }
+
+        // Fallback: read the WKT2 string embedded in TIFF tag 34737 (GeoAsciiParamsTag).
+        // Many official DEMNAS files store their CRS as a WKT string here instead of (or
+        // in addition to) a short GeoKey integer, so no QGIS pre-processing is required.
+        if epsg == nil, let ascii = reader.string(34737) {
+            // The GeoAsciiParamsTag may concatenate multiple strings separated by '|'.
+            // Try the full value first, then each pipe-delimited segment.
+            let candidates = [ascii] + ascii.split(separator: "|", omittingEmptySubsequences: true).map(String.init)
+            for candidate in candidates {
+                if let resolved = try? CompanionMetadata.explicitEPSG(in: candidate) {
+                    epsg = resolved
+                    provenance.append("CRS resolved from embedded WKT in GeoAsciiParamsTag (tag 34737).")
+                    break
+                }
+            }
+        }
+
+        if let manual = manualEPSG {
+            epsg = manual
+            provenance.append("CRS manually assigned by user as EPSG:\(manual); pixel coordinates interpreted in this CRS.")
+        } else {
+            if let embedded = epsg, let sidecar = companion.epsg, embedded != sidecar { throw TerrainError("Embedded and companion CRS identifiers conflict.") }
+            if epsg == nil { epsg = companion.epsg; if epsg != nil { provenance.append("CRS assigned from companion metadata; sample coordinates were not reprojected.") } }
+        }
+
+        guard let epsg else { throw TerrainError("The raster has no detectable CRS. Use 'Import & Assign CRS' to specify its coordinate reference system.") }
         let crs = try CoordinateTransformer(epsg: epsg)
-        if let unit = keys[2054], epsg == 4326, unit != 9102 { throw TerrainError("The geographic CRS must use decimal degrees.") }
-        if let unit = keys[3076], epsg != 4326, unit != 9001 { throw TerrainError("The projected CRS must use metres.") }
+        if manualEPSG == nil {
+            if let unit = keys[2054], epsg == 4326, unit != 9102 { throw TerrainError("The geographic CRS must use decimal degrees.") }
+            if let unit = keys[3076], epsg != 4326, unit != 9001 { throw TerrainError("The projected CRS must use metres.") }
+        }
         if let unit = keys[4099], unit != 9001 { throw TerrainError("Vertical units must be metres; this reader does not silently convert elevation units.") }
         if let xml = reader.string(42112) {
             let metadata = GDALBandMetadataParser()

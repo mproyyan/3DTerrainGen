@@ -88,6 +88,11 @@ final class TerrainSession {
     }
     var showFootprint = true
     var confirmedDEMNAS = false
+    // Manual CRS override – used only when the file carries no detectable CRS.
+    var useManualEPSG = false
+    var manualEPSGCode: String = ""
+    /// Parsed integer override; nil when the toggle is off or the input is not a valid number.
+    var manualEPSG: Int? { useManualEPSG ? Int(manualEPSGCode.trimmingCharacters(in: .whitespaces)) : nil }
     var imported: ImportedDEM?
     var mesh: TerrainMesh?
     var errorMessage: String?
@@ -95,12 +100,15 @@ final class TerrainSession {
     private var importing: Task<ImportedDEM, Error>?
     private var generating: Task<TerrainMesh, Error>?
 
-    func load(_ urls: [URL]) {
+    var pendingURLsForCRSSelection: [URL]? = nil
+
+    func load(_ urls: [URL], overrideEPSG: Int? = nil) {
         guard activity == nil else { return }
         let confirmation = confirmedDEMNAS
+        let epsgOverride = overrideEPSG ?? manualEPSG
         activity = "Reading GeoTIFF and validating georeferencing…"
         let job = Task.detached(priority: .userInitiated) {
-            let result = try DEMImporter.load(urls: urls, confirmedDEMNAS: confirmation)
+            let result = try DEMImporter.load(urls: urls, confirmedDEMNAS: confirmation, manualEPSG: epsgOverride)
             if Task.isCancelled { try? FileManager.default.removeItem(at: result.directory); throw CancellationError() }
             return result
         }
@@ -120,7 +128,8 @@ final class TerrainSession {
         let polygon = selection.coordinates.map { GeoPoint($0) }
         activity = "Checking coverage, clipping elevations, and building terrain…"
         let job = Task.detached(priority: .userInitiated) {
-            let source = try GeoTIFFSource(url: imported.url, confirmedDEMNAS: imported.confirmedDEMNAS)
+            let source = try GeoTIFFSource(url: imported.url, confirmedDEMNAS: imported.confirmedDEMNAS,
+                                           manualEPSG: imported.manualEPSG)
             let grid = try RasterClippingService.clip(source: source, polygon: polygon)
             return try TerrainMeshGenerator.generate(grid)
         }
