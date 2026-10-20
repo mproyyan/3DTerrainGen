@@ -1,6 +1,6 @@
 # DEMNAS 3D Map
 
-An iPhone-only SwiftUI app: select a polygon on Apple Maps, import a real elevation GeoTIFF, validate its geographic reference, and view the clipped terrain in RealityKit. Minimum deployment target: **iOS 17**. The project builds with Xcode 27 / Swift 6; no package downloads or native binary installation are required. The Swift package is a separate test harness for the same core source files used by the app.
+An iPhone-only SwiftUI app: select a polygon on Apple Maps, download the matching DEMNAS raster from BIG's ImageServer, and view the polygon-clipped terrain in RealityKit. Minimum deployment target: **iOS 17**. The project builds with Xcode 27 / Swift 6; no package downloads or native binary installation are required. The Swift package is a separate test harness for the same core source files used by the app.
 
 ## Run
 
@@ -8,31 +8,29 @@ Open `Demnas3DMap.xcodeproj`, choose an iPhone destination, and run. Use your si
 
 1. Navigate the map with Draw off. Enable **Draw** and tap distinct vertices; dragging and pinching continue to navigate. Disable Draw whenever you want taps to leave the boundary unchanged.
 2. Use Undo/Reset as needed, then Finish. Self-intersections, repeated vertices, and degenerate boundaries are rejected.
-3. Import one `.tif`/`.tiff`. Select matching `.tfw`/`.tifw`/`.wld`, `.prj`, or `.tif.aux.xml` companions **in the same file-picker selection** when needed. iOS access to a TIFF does not grant access to neighboring files.
-4. Confirm official DEMNAS provenance only if known. This supplies missing **vertical** information (metres, EGM2008), never a horizontal CRS.
-5. Use Frame DEM and the orange footprint to compare the imported tile with the cyan selection.
-6. Generate 3D. Drag to orbit, pinch to zoom, two-finger drag to pan; Reset camera restores the initial view. Details preserve the CRS, vertical reference, original height origin, and processing provenance.
+3. Choose **Ambil DEMNAS & Buat 3D**. The app requests a padded bounding box from BIG's public `ImageServer`, clips the result to the exact drawn polygon, and builds the mesh. The server download is cancellable.
+4. Use Frame DEM and the orange footprint to compare the downloaded raster extent with the cyan selection.
+5. Drag to orbit, pinch to zoom, two-finger drag to pan; Reset camera restores the initial view. Details preserve the CRS, vertical reference, original height origin, and processing provenance.
 
-All elevation processing is local. Apple Maps imagery still depends on network/cache availability. No location permission is requested because the app does not track the device.
+The request sends only the selected bounding box to BIG; raster clipping and mesh processing run locally. Apple Maps imagery and DEMNAS download require network access. No location permission is requested because the app does not track the device.
 
 ## Architecture
 
 - `Core/Geometry.swift`: coordinate capture model, polygon validation, ear triangulation, convex clipping.
 - `Core/TIFFReader.swift`: bounded, read-only, seek-based TIFF parsing and block decoding; no ImageIO color conversion of elevation samples.
-- `Core/DEMMetadata.swift`: GeoKeys, pixel-center/corner semantics, metadata recovery and conflict validation.
+- `Core/DEMNASImageServer.swift`: bounded `exportImage` request, response validation, and authoritative request-derived EPSG:4326/EGM2008 metadata.
+- `Core/DEMMetadata.swift`: GeoKeys, pixel-center/corner semantics, and generic GeoTIFF metadata validation used by the decoder tests.
 - `Core/CoordinateTransformer.swift`: supported CRS conversions, invertible six-term affine transform, WGS 84 local east/north metric frame.
-- `Core/TerrainPipeline.swift`: security-scoped import, replaceable `DEMRasterSource`, raster window/mask, boundary-clipped triangle mesh, original elevation metadata.
-- `TerrainSession.swift`: main-actor UI state, cancellable worker tasks, import lifetime.
-- `Views/TerrainMapView.swift`: native Map/MapReader/MapPolygon and fileImporter.
+- `Core/TerrainPipeline.swift`: replaceable `DEMRasterSource`, raster window/mask, boundary-clipped triangle mesh, original elevation metadata.
+- `TerrainSession.swift`: main-actor UI state and cancellable fetch/mesh worker task.
+- `Views/TerrainMapView.swift`: native Map/MapReader/MapPolygon and DEMNAS terrain action.
 - `Views/Terrain3DView.swift`: asynchronous MeshDescriptor resource loading and a non-AR RealityKit camera with touch controls.
 
 To support a future tile catalog, implement `DEMRasterSource` with catalog-provided metadata and sample access. The clipping/mesh pipeline does not depend on TIFF. A tile catalog must carry authoritative CRS/footprint provenance; filename and pixel dimensions are never substitutes.
 
 ## Geographic interpretation
 
-GeoTIFF ModelPixelScale+ModelTiepoint or ModelTransformation define the affine mapping. PixelIsPoint is shifted by half a pixel into a consistent corner-based transform. World files are also converted from sample-center origins. Rotated/sheared transforms are supported. Footprints are derived from raster bounds and densified before geographic conversion.
-
-Case A uses embedded CRS and georeferencing. Case B may assign a missing CRS from a companion's explicit root EPSG identifier. Case C can recover the transform from a world file or PAM auxiliary GeoTransform, but still needs a CRS. Conflicts are errors. There is no filename-based CRS or tile-position inference. Unnamed/custom WKT and missing authoritative references produce actionable errors.
+BIG's request declares EPSG:4326 and the exact output extent. The app derives its corner-based affine transform from that request rather than trusting optional GeoTIFF CRS tags in the response. This avoids inference from filename or pixel dimensions. DEMNAS elevations are recorded as EGM2008 orthometric metres from the service metadata.
 
 Apple Maps coordinates enter as WGS 84 longitude/latitude. Transforming them into the DEM CRS is distinct from assigning a missing CRS identifier. Supported CRSs: EPSG:4326, EPSG:3857, and WGS 84 UTM EPSG:32601–32660/32701–32760. UTM is restricted to its normal latitude range and within six degrees of its central meridian. No approximate datum substitutions are made. Map edges are adaptively subdivided in Mercator space until their projected midpoint deviation is at most 0.02 raster pixels. The mesh boundary matches that transformed polygon to numerical clipping tolerance; it is not claimed to have zero projection approximation error.
 
@@ -44,17 +42,17 @@ Horizontal positions use double-precision WGS 84 ECEF projected onto local east/
 
 ## Native reader scope and GDAL evaluation
 
-Supported: classic TIFF, either byte order; single-band grayscale Float32/Float64 or signed/unsigned 16/32-bit integers; strips or tiles; uncompressed, TIFF LZW, and zlib Deflate; integer horizontal predictor and floating-point predictor; GeoTIFF keys, affine georeferencing and GDAL NoData. Harmless GDAL statistics are accepted; nonidentity scale/offset or non-metre height units are rejected. Companion recovery accepts explicit EPSG text or root-authority WKT and PAM XML. Only explicitly selected matching companions are used.
+Supported: classic TIFF, either byte order; single-band grayscale Float32/Float64 or signed/unsigned 16/32-bit integers; strips or tiles; uncompressed, TIFF LZW, and zlib Deflate; integer horizontal predictor and floating-point predictor; GeoTIFF keys, affine georeferencing and GDAL NoData. The DEMNAS ImageServer response is required to be a single-band Float32 TIFF whose dimensions exactly match the requested export size.
 
 Unsupported inputs are rejected: BigTIFF, JPEG/PackBits/LERC/ZSTD, multiband/color rasters, alternate TIFF orientations, internal validity masks/SubIFDs, multiple primary images, custom/other datums, arbitrary GCP fitting, scaled bands, and ambiguous CRS metadata. External `.msk`, `.ovr`, RPC, and other sidecars are not supported; do not use a raster whose validity depends on them. This is not a general replacement for GDAL. Without a real file from the user's DEMNAS download, compatibility with that specific tile is **unverified**.
 
 GDAL is a sensible broader-format backend, but is not bundled here. A reliable iOS integration would require pinned native GDAL, PROJ (including `proj.db` and any datum grids), TIFF/GeoTIFF and codec dependencies built as an XCFramework for device arm64 and simulator arm64/x86_64, license notices, and a C/Objective-C wrapper around GDALOpenEx/GDALRasterIO/OSR coordinate transforms. Its build/data packaging needs device validation. Invoking `gdalwarp` or other shell programs on iOS is not an integration strategy. The source protocol allows that backend to replace this decoder without rewriting clipping or rendering.
 
-Limits: 2 GB imported TIFF; 1 MB each companion; 16 MB decoded strip/tile; 24 MB decoded block cache; four million source samples per extraction; up to 128 boundary vertices after projection subdivision; 200,000 mesh vertices/triangles. Mesh sampling reduces fine detail and can smooth narrow peaks. Import copies the file to private temporary storage; only overlapping blocks are decoded during extraction. Cancellation is checked during reading/clipping/meshing, but a single file-copy/decompression operation must finish first. No persistent import catalog, tile mosaicking, geoid grids, wireframe, or project save/export is implemented.
+Limits: ImageServer requests are capped at 2,000 pixels on either axis and about 3.5 million source samples; 16 MB decoded strip/tile; 24 MB decoded block cache; four million source samples per extraction; up to 128 boundary vertices after projection subdivision; 200,000 mesh vertices/triangles. Mesh sampling reduces fine detail and can smooth narrow peaks. The downloaded TIFF lives only in private temporary storage while the mesh is built. Cancellation is checked during download, reading, clipping, and meshing. No persistent raster cache, tile mosaicking, geoid grids, wireframe, or project save/export is implemented.
 
 ## Validation
 
-Verified in this workspace on 12 October 2026: **13 core tests passed**, unsigned iPhone and iPhone Simulator builds succeeded, and the app launched in the iOS 27 iPhone 18 Pro simulator with the map/control layout visually inspected. Decoder tests also read floating-point TIFFs encoded independently by Apple ImageIO, including LZW dictionary growth. Real-tile accuracy, touch interaction, and physical-device file-provider access remain unverified.
+Verified in this workspace on 20 October 2026: **23 core tests passed** and an unsigned iPhone Simulator build succeeded. The BIG endpoint was sampled with a small request and returned an uncompressed 32-bit TIFF. The client requests the first overview level because the current native service tiles can contain undocumented ±1.134e38 sentinels; out-of-range samples are rejected rather than rendered. Decoder tests also read floating-point TIFFs encoded independently by Apple ImageIO, including LZW dictionary growth. Real-terrain accuracy, touch interaction, and physical-device networking remain unverified.
 
 Run the shared-core tests on macOS:
 
@@ -72,12 +70,12 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild \
 
 Tests generate synthetic TIFF fixtures **only in the test target**. They cover byte order, compression/predictors, geographic bounds, PixelIsPoint, rotated transforms, CRS controls/round trips, missing/conflicting metadata, auxiliary recovery, source-file copying, self-intersections, coverage rejection, NoData before downsampling, concave polygon mesh area, upward normals, and interpolated mesh heights. Coordinate-capture tests cover the selection model; actual MapReader screen-to-map conversion still needs an interactive map test.
 
-Manual acceptance with a genuine DEMNAS tile remains necessary: draw a boundary whose location is independently known, compare the orange footprint with authoritative tile bounds, generate terrain, inspect slopes and extrema against known source values, exercise all viewer gestures, cancel a large job, and test Files/iCloud security-scoped imports on a physical iPhone. No real DEMNAS tile was supplied with the request.
+Manual acceptance against DEMNAS remains necessary: draw a boundary whose location is independently known, compare the orange footprint with the selected area, generate terrain, inspect slopes and extrema against known source values, exercise all viewer gestures, cancel a large job, and test network errors on a physical iPhone.
 
 ## References
 
 - [BIG DEMNAS product description](https://www.big.go.id/en/content/produk/demnas): resolution and EGM2008 vertical reference.
-- [Official DEMNAS download portal](https://tanahair.indonesia.go.id/portal-web/unduh/demnas).
+- [BIG DEMNAS ImageServer](https://geoservices.big.go.id/raster/rest/services/DEMNAS/DEM_Indonesia/ImageServer): source service and `exportImage` operation.
 - [OGC GeoTIFF specification](https://docs.ogc.org/is/19-008r4/19-008r4.html): keys and raster georeferencing.
 - [GDAL GeoTIFF driver](https://gdal.org/en/stable/drivers/raster/gtiff.html): format scope, NoData and metadata conventions.
 - [GDAL native build requirements](https://gdal.org/en/stable/development/building_from_source.html).
@@ -87,7 +85,7 @@ Manual acceptance with a genuine DEMNAS tile remains necessary: draw a boundary 
 
 The terrain viewer now includes an on-device CPT investigation workflow. **DRL and SchemaGAN are not implemented.** Soil interpretations, spatial coverage, strengths, recommendations, and completion are explicitly presented as simulations; they are not validated geotechnical design results.
 
-1. Draw the boundary, import a DEM, and generate the terrain as before.
+1. Draw the boundary, choose **Ambil DEMNAS & Buat 3D**, and wait for the terrain to be generated.
 2. Return to the map and choose **Tambah CPT**, then tap inside the terrain. Points must be at least 2 m apart (maximum 32). A point is saved immediately as waiting for field testing/data.
 3. Open the point and paste a CSV profile, import a UTF-8 CSV from Files, or choose **Isi contoh sintetis** for a labeled demonstration dataset.
 4. Review assumptions and choose **Simpan & generate lapisan**. Layer intervals, mean Ic, and applicable illustrative strengths appear beneath the editor.
@@ -126,7 +124,7 @@ CPT surface elevations are sampled from the rendered DEM and retain its vertical
 
 The spatial visualization consists of a bounded 14 × 14 grid of columns. Each supported column extends the **nearest completed CPT profile relative to local ground depth**. It does not match geological horizons across CPTs or perform SchemaGAN interpolation. Cells crossing the polygon boundary or concave notches are omitted, leaving visible edge gaps. Gray translucent columns indicate unsupported spatial coverage or unmeasured depth; the depth below the deepest profile remains outside the displayed model. Narrow columns at actual CPT locations show their interpreted profiles. A half cutaway exposes the interior without changing any computed data.
 
-One project is saved atomically in the app's Application Support directory, including the polygon, terrain snapshot, CPT inputs, assumptions, data origin, derived profiles, scenario, and timestamps. Unapplied editor drafts are saved when the editor closes. The project restores on relaunch without the source TIFF; importing a new DEM requires starting a new area. **Area baru** asks before clearing the saved project. This is one local project, without cloud sync or project export.
+One project is saved atomically in the app's Application Support directory, including the polygon, terrain snapshot, CPT inputs, assumptions, data origin, derived profiles, scenario, and timestamps. Unapplied editor drafts are saved when the editor closes. The project restores on relaunch without retaining the temporary source TIFF; fetching terrain for a new area requires starting a new area. **Area baru** asks before clearing the saved project. This is one local project, without cloud sync or project export.
 
 ### Relationship to the research paper
 

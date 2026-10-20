@@ -1,14 +1,10 @@
 import SwiftUI
 import MapKit
-import UniformTypeIdentifiers
 
 struct TerrainMapView: View {
     @Bindable var session: TerrainSession
     @State private var camera: MapCameraPosition = .region(.init(center: .init(latitude: -7.54, longitude: 110.44), span: .init(latitudeDelta: 0.12, longitudeDelta: 0.12)))
-    @State private var showImporter = false
-    @State private var showImportOptions = false
     @State private var showViewer = false
-    @State private var chooseFilesAfterDismiss = false
     @State private var showInvestigation = false
     @State private var selectedPoint: CPTPoint?
     @State private var resetConfirmation = false
@@ -17,7 +13,7 @@ struct TerrainMapView: View {
         NavigationStack {
             MapReader { proxy in
                 Map(position: $camera, interactionModes: .all) {
-                    if session.showFootprint, let metadata = session.imported?.metadata ?? session.mesh?.metadata {
+                    if let metadata = session.mesh?.metadata {
                         MapPolygon(coordinates: metadata.footprint.map(\.coordinate))
                             .foregroundStyle(.orange.opacity(0.12))
                             .stroke(.orange, style: StrokeStyle(lineWidth: 2, dash: [6,4]))
@@ -69,14 +65,11 @@ struct TerrainMapView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement:.topBarTrailing) {
-                    if let metadata = session.imported?.metadata ?? session.mesh?.metadata {
+                    if let metadata = session.mesh?.metadata {
                         Button("Frame DEM",systemImage:"viewfinder") { frame(metadata.footprint) }
                     }
                 }
             }
-            .sheet(isPresented:$showImportOptions,onDismiss: {
-                if chooseFilesAfterDismiss { chooseFilesAfterDismiss = false; showImporter = true }
-            }) { importOptions }
             .sheet(isPresented: $showInvestigation) { CPTWorkspaceView(session: session) }
             .sheet(item: $selectedPoint) { point in
                 NavigationStack {
@@ -88,12 +81,6 @@ struct TerrainMapView: View {
                 Button("Hapus proyek & mulai baru", role: .destructive) { session.reset() }
             }
             .onAppear { if session.mesh != nil { frame(session.selection.coordinates.map { GeoPoint($0) }) } }
-            .fileImporter(isPresented:$showImporter, allowedContentTypes:[.data], allowsMultipleSelection:true) { result in
-                switch result {
-                case .success(let urls): session.load(urls)
-                case .failure(let error): session.errorMessage = error.localizedDescription
-                }
-            }
             .alert("Unable to continue",isPresented:Binding(get:{session.errorMessage != nil},set:{ if !$0 { session.errorMessage = nil } })) {
                 Button("OK",role:.cancel) { session.errorMessage = nil }
             } message: { Text(session.errorMessage ?? "") }
@@ -124,23 +111,10 @@ struct TerrainMapView: View {
                         catch { session.errorMessage = error.localizedDescription }
                     }.disabled(session.selection.coordinates.count < 3 || session.selection.isFinished)
                 }.font(.subheadline).labelStyle(.iconOnly)
-                if let imported = session.imported {
-                    HStack {
-                        VStack(alignment:.leading) {
-                            Text(imported.url.lastPathComponent).lineLimit(1).font(.caption.bold())
-                            Text("\(imported.metadata.width) × \(imported.metadata.height) · EPSG:\(imported.metadata.epsg)").font(.caption)
-                        }
-                        Spacer()
-                        Toggle("DEM outline",isOn:$session.showFootprint).font(.caption).fixedSize()
-                    }
-                    Text("Orange: DEM footprint · Cyan: selection").font(.caption2).foregroundStyle(.secondary)
-                }
                 HStack {
-                    Button(session.imported == nil ? "Import GeoTIFF" : "Replace DEM",systemImage:"square.and.arrow.down") { showImportOptions = true }
-                        .buttonStyle(.bordered)
                     Spacer()
-                    Button("Generate 3D",systemImage:"mountain.2.fill") { session.generate() }
-                        .buttonStyle(.borderedProminent).disabled(!session.selection.isFinished || session.imported == nil)
+                    Button("Ambil DEMNAS & Buat 3D",systemImage:"mountain.2.fill") { session.fetchDEMNASAndGenerate() }
+                        .buttonStyle(.borderedProminent).disabled(!session.selection.isFinished)
                 }.font(.subheadline)
             }
         }
@@ -164,25 +138,6 @@ struct TerrainMapView: View {
                 Button("3D", systemImage: "cube") { session.placingCPT = false; showViewer = true }.buttonStyle(.borderedProminent)
             }.font(.subheadline)
             if session.recommendation != nil { Text("Target merah muda: kandidat simulasi. Buka Investigasi untuk menetapkannya.").font(.caption2).foregroundStyle(.secondary) }
-        }
-    }
-    private var importOptions: some View {
-        NavigationStack {
-            Form {
-                Section("Select a DEM") {
-                    Text("Choose one .tif or .tiff file. If georeferencing is missing, select its matching .tfw, .prj, or .tif.aux.xml files in the same picker selection.")
-                    Text("Companion files must share the DEM's basename. They are read locally; no elevation data is uploaded.")
-                }
-                Section("Elevation reference") {
-                    Toggle("This is an original official DEMNAS file",isOn:$session.confirmedDEMNAS)
-                    Text("Use this only when you know the source. Official DEMNAS heights are metres relative to EGM2008. This confirmation supplies missing vertical metadata; it does not assign a horizontal CRS.").font(.footnote)
-                    Link("Official DEMNAS download portal",destination:URL(string:"https://tanahair.indonesia.go.id/portal-web/unduh/demnas")!)
-                }
-                Section {
-                    Button("Choose files…") { chooseFilesAfterDismiss = true; showImportOptions = false }
-                }
-            }.navigationTitle("Import elevation")
-                .toolbar { ToolbarItem(placement:.cancellationAction) { Button("Cancel") { showImportOptions = false } } }
         }
     }
     private func frame(_ points: [GeoPoint]) {

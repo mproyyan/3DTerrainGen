@@ -114,6 +114,48 @@ private let boundary = [Point2(x:1,y:1),Point2(x:4.8,y:1.2),Point2(x:4.1,y:4.6),
     #expect(throws:TerrainError.self) { try Geometry.validate([.init(x:0,y:0),.init(x:1,y:0),.init(x:0,y:0)]) }
 }
 
+@Test func demnasImageServerRequestPadsAndBoundsTheSelectedPolygon() throws {
+    let polygon = [
+        GeoPoint(longitude: 110.4300, latitude: -7.7600),
+        GeoPoint(longitude: 110.4400, latitude: -7.7600),
+        GeoPoint(longitude: 110.4400, latitude: -7.7500),
+        GeoPoint(longitude: 110.4300, latitude: -7.7500)
+    ]
+    let export = try DEMNASImageServer.request(for: polygon)
+    #expect(export.width > 4 && export.height > 4)
+    #expect(export.width <= 2_000 && export.height <= 2_000)
+    #expect(export.bounds.west < 110.4300 && export.bounds.east > 110.4400)
+    #expect(export.bounds.south < -7.7600 && export.bounds.north > -7.7500)
+    let items = try #require(URLComponents(url: export.url, resolvingAgainstBaseURL: false)?.queryItems)
+    #expect(items.first(where: { $0.name == "format" })?.value == "tiff")
+    #expect(items.first(where: { $0.name == "pixelType" })?.value == "F32")
+    #expect(items.first(where: { $0.name == "adjustAspectRatio" })?.value == "false")
+    #expect(items.first(where: { $0.name == "f" })?.value == "image")
+
+    let pixelWidth = (export.bounds.east - export.bounds.west) / Double(export.width)
+    #expect(pixelWidth >= 0.0001999)
+
+    let transform = AffineTransform(x0: export.bounds.west,
+                                    a: (export.bounds.east - export.bounds.west) / Double(export.width), b: 0,
+                                    y0: export.bounds.north, d: 0,
+                                    e: -(export.bounds.north - export.bounds.south) / Double(export.height))
+    for point in polygon {
+        let pixel = transform.pixel(point.point)
+        #expect(pixel.x > 0.5 && pixel.x < Double(export.width) - 0.5)
+        #expect(pixel.y > 0.5 && pixel.y < Double(export.height) - 0.5)
+    }
+}
+
+@Test func demnasImageServerRejectsSelectionOutsideCoverage() throws {
+    let outside = [
+        GeoPoint(longitude: 94.75001, latitude: -7.00),
+        GeoPoint(longitude: 94.75100, latitude: -7.00),
+        GeoPoint(longitude: 94.75100, latitude: -6.99),
+        GeoPoint(longitude: 94.75001, latitude: -6.99)
+    ]
+    #expect(throws: TerrainError.self) { try DEMNASImageServer.request(for: outside) }
+}
+
 @Test(arguments:[false,true]) func geotiffMetadataAndEndian(bigEndian:Bool) throws {
     var fixture = Fixture(); fixture.bigEndian = bigEndian
     try fixture.withFile { url in
@@ -237,6 +279,15 @@ private let boundary = [Point2(x:1,y:1),Point2(x:4.8,y:1.2),Point2(x:4.1,y:4.6),
     }
 }
 
+@Test func extremeImageServerSentinelIsRejectedAsInvalidElevation() throws {
+    var fixture = Fixture()
+    fixture.values[2 * fixture.width + 2] = 1.1342745e38
+    try fixture.withFile { url in
+        let source = try GeoTIFFSource(url: url, confirmedDEMNAS: false)
+        #expect(throws: TerrainError.self) { try RasterClippingService.clip(source: source, polygon: boundary.map(geo)) }
+    }
+}
+
 @Test func malformedTIFFRejected() throws {
     try Fixture().withFile { url in
         let original = try Data(contentsOf:url)
@@ -268,19 +319,6 @@ private let boundary = [Point2(x:1,y:1),Point2(x:4.8,y:1.2),Point2(x:4.1,y:4.6),
             }
             else { #expect(throws:TerrainError.self) { try GeoTIFFSource(url:url,confirmedDEMNAS:false) } }
         }
-    }
-}
-
-@Test func externalScopedImportAndCompanionMatching() throws {
-    try Fixture().withFile { url in
-        let imported = try DEMImporter.load(urls:[url],confirmedDEMNAS:false)
-        defer { try? FileManager.default.removeItem(at:imported.directory) }
-        #expect(imported.url != url && FileManager.default.fileExists(atPath:imported.url.path))
-        #expect(imported.metadata.epsg == 4326)
-        #expect(throws:TerrainError.self) { try DEMImporter.load(urls:[url,url],confirmedDEMNAS:false) }
-        let wrong = url.deletingLastPathComponent().appendingPathComponent("other.prj")
-        try "EPSG:4326".write(to:wrong,atomically:true,encoding:.utf8)
-        #expect(throws:TerrainError.self) { try DEMImporter.load(urls:[url,wrong],confirmedDEMNAS:false) }
     }
 }
 
