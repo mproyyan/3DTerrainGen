@@ -9,50 +9,20 @@ protocol DEMRasterSource {
 final class GeoTIFFSource: DEMRasterSource {
     let reader: TIFFReader
     let metadata: DEMMetadata
-    init(url: URL, confirmedDEMNAS: Bool, manualEPSG: Int? = nil) throws {
+    init(url: URL, confirmedDEMNAS: Bool) throws {
         reader = try TIFFReader(url: url)
-        metadata = try DEMMetadataValidator.validate(reader, companion: CompanionMetadata.read(beside: url),
-                                                     confirmedDEMNAS: confirmedDEMNAS, manualEPSG: manualEPSG)
+        metadata = try DEMMetadataValidator.validate(reader, companion: CompanionMetadata.read(beside: url), confirmedDEMNAS: confirmedDEMNAS)
+    }
+    /// The ImageServer request defines the output extent and spatial reference,
+    /// so its metadata is authoritative even when the returned TIFF omits tags.
+    init(url: URL, metadata: DEMMetadata) throws {
+        reader = try TIFFReader(url: url)
+        guard reader.width == metadata.width, reader.height == metadata.height else {
+            throw TerrainError("The DEMNAS response dimensions do not match its requested extent.")
+        }
+        self.metadata = metadata
     }
     func sample(column: Int, row: Int) throws -> Double { try reader.sample(column: column, row: row) }
-}
-
-struct ImportedDEM: Sendable {
-    let url: URL
-    let directory: URL
-    let metadata: DEMMetadata
-    let confirmedDEMNAS: Bool
-    let manualEPSG: Int?
-}
-
-enum DEMImporter {
-    /// Copy while security-scoped access is active. A source never outlives its permission.
-    static func load(urls: [URL], confirmedDEMNAS: Bool, manualEPSG: Int? = nil) throws -> ImportedDEM {
-        let rasters = urls.filter { ["tif","tiff"].contains($0.pathExtension.lowercased()) }
-        guard rasters.count == 1, let raster = rasters.first else { throw TerrainError("Select exactly one .tif/.tiff DEM, optionally with its matching .tfw, .prj, or .tif.aux.xml companions.") }
-        let fm = FileManager.default
-        let directory = fm.temporaryDirectory.appendingPathComponent("DEMNAS-\(UUID().uuidString)", isDirectory: true)
-        try fm.createDirectory(at: directory, withIntermediateDirectories: true)
-        do {
-            let base = raster.deletingPathExtension().lastPathComponent.lowercased()
-            let accepted = Set([raster.lastPathComponent.lowercased(), base+".tfw",base+".tifw",base+".wld",base+".prj",raster.lastPathComponent.lowercased()+".aux.xml"])
-            guard urls.count <= 7 else { throw TerrainError("Select only the DEM and its companion metadata.") }
-            for url in urls {
-                try Task.checkCancellation()
-                guard accepted.contains(url.lastPathComponent.lowercased()) else { throw TerrainError("\(url.lastPathComponent) does not match the selected DEM's basename.") }
-                let access = url.startAccessingSecurityScopedResource()
-                defer { if access { url.stopAccessingSecurityScopedResource() } }
-                let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? Int.max
-                guard size <= (url == raster ? 2_000_000_000 : 1_000_000) else { throw TerrainError("DEM files are limited to 2 GB and companion files to 1 MB.") }
-                let destination = directory.appendingPathComponent(url.lastPathComponent.lowercased())
-                try fm.copyItem(at: url, to: destination)
-            }
-            let local = directory.appendingPathComponent(raster.lastPathComponent.lowercased())
-            let source = try GeoTIFFSource(url: local, confirmedDEMNAS: confirmedDEMNAS, manualEPSG: manualEPSG)
-            return .init(url: local, directory: directory, metadata: source.metadata,
-                         confirmedDEMNAS: confirmedDEMNAS, manualEPSG: manualEPSG)
-        } catch { try? fm.removeItem(at: directory); throw error }
-    }
 }
 
 struct ElevationGrid: Sendable {
@@ -100,7 +70,12 @@ enum RasterClippingService {
         guard width >= 2, height >= 2, width*height <= 4_000_000 else { throw TerrainError("Selection needs more than four million source samples. Draw a smaller polygon to stay within iPhone memory limits.") }
         var window = [Double](repeating: .nan, count: width*height)
         var low = Double.infinity, high = -Double.infinity
-        func valid(_ value: Double) -> Bool { value.isFinite && (m.noData == nil || value != m.noData!) }
+        // DEMNAS elevations are orthometric ground heights. A value outside this
+        // broad physical range is a service sentinel rather than terrain (BIG has
+        // returned ±1.134e38 without an explicit TIFF NoData tag).
+        func valid(_ value: Double) -> Bool {
+            value.isFinite && abs(value) <= 20_000 && (m.noData == nil || value != m.noData!)
+        }
         for row in top...bottom {
             if row % 16 == 0 { try Task.checkCancellation() }
             for col in left...right {
@@ -111,7 +86,7 @@ enum RasterClippingService {
                     // Also detect a NoData cell that crosses the boundary, even if its center is outside.
                     let cell = [Point2(x:Double(col),y:Double(row)),Point2(x:Double(col+1),y:Double(row)),Point2(x:Double(col+1),y:Double(row+1)),Point2(x:Double(col),y:Double(row+1))]
                     if inside || triangles.contains(where: { abs(Geometry.area(Geometry.clip(cell,to:$0))) > 1e-12 }) {
-                        throw TerrainError("The selected polygon includes NoData or non-finite elevation cells. Choose a fully covered region; missing heights are never filled silently.")
+                        throw TerrainError("The selected polygon includes NoData, invalid, or out-of-range elevation cells. Choose a fully covered region; missing heights are never filled silently.")
                     }
                 } else {
                     window[(row-top)*width+col-left] = value
