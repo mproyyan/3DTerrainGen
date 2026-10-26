@@ -3,6 +3,23 @@ import Foundation
 import simd
 @testable import TerrainCore
 
+@Test func syntheticCPTFilesImportAndReachDQNDepth() throws {
+    let root = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        .appendingPathComponent("SampleData")
+    let files = try FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
+        .filter { $0.pathExtension == "csv" }
+    #expect(files.count == 5)
+    for file in files {
+        let csv = try String(contentsOf: file, encoding: .utf8)
+        let samples = try CPTProcessor.parse(csv)
+        let interpreted = try CPTProcessor.interpret(csv: csv, assumptions: CPTAssumptions())
+        #expect(samples.count == 32)
+        #expect(samples.last?.depth == 16)
+        #expect(interpreted.values.allSatisfy { $0.ic.isFinite })
+    }
+}
+
 private func testTerrain(concave: Bool = false) throws -> (TerrainMesh, [GeoPoint]) {
     let coords: [Point2] = concave ? [.init(x:0,y:0),.init(x:0.002,y:0),.init(x:0.002,y:0.0007),.init(x:0.0007,y:0.0007),.init(x:0.0007,y:0.002),.init(x:0,y:0.002)] : [.init(x:0,y:0),.init(x:0.002,y:0),.init(x:0.002,y:0.002),.init(x:0,y:0.002)]
     let geos = coords.map { GeoPoint(longitude:110+$0.x, latitude:-7+$0.y) }
@@ -125,9 +142,11 @@ private func testPoint(_ n: Int, complete: Bool = true, depth: Double = 10) thro
     let (terrain,boundary) = try testTerrain()
     var points = [try testPoint(0),try testPoint(1,complete:false)]
     points[1].draft = .init(csv: "unfinished CSV", assumptions: .init(), origin: .entered)
-    let original = InvestigationProject(boundary:boundary,terrain:terrain,points:points,scenario:.variable)
+    var original = InvestigationProject(boundary:boundary,terrain:terrain,points:points,scenario:.variable)
+    original.spatialResolutionMeters = 2.5
     let restored = try InvestigationProject.decode(original.encoded())
     #expect(restored.boundary == boundary)
+    #expect(restored.spatialResolutionMeters == 2.5)
     #expect(restored.terrain.positions == terrain.positions)
     #expect(restored.terrain.metadata.noData?.isNaN == true)
     #expect(restored.points[0].interpretation?.layers.count == points[0].interpretation?.layers.count)
@@ -135,6 +154,10 @@ private func testPoint(_ n: Int, complete: Bool = true, depth: Double = 10) thro
     #expect(restored.points[1].interpretation == nil)
     #expect(restored.points[1].draft?.csv == "unfinished CSV")
     #expect(restored.points[0].id == points[0].id)
+    var legacy = try JSONSerialization.jsonObject(with: original.encoded()) as! [String: Any]
+    legacy.removeValue(forKey: "spatialResolutionMeters")
+    let legacyProject = try InvestigationProject.decode(JSONSerialization.data(withJSONObject: legacy))
+    #expect(legacyProject.spatialResolutionMeters == nil)
     var unsupported = original; unsupported.version = 2
     #expect(throws: TerrainError.self) { try InvestigationProject.decode(unsupported.encoded()) }
 }

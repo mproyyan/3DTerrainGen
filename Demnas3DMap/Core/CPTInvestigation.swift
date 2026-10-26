@@ -268,6 +268,7 @@ struct InvestigationProject: Codable, Sendable {
     let terrain: TerrainMesh
     let points: [CPTPoint]
     let scenario: InvestigationScenario
+    var spatialResolutionMeters: Double? = nil
 
     func encoded() throws -> Data {
         let encoder = JSONEncoder()

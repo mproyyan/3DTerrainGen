@@ -1,0 +1,3 @@
+Five synthetic CPT profiles for testing the app. These are demonstration inputs, not field measurements and not suitable for engineering decisions.
+
+Each CSV uses the app header `depth_m,qc_mpa,fs_kpa,u2_kpa`, 0.5 m spacing to 16.0 m, and leaves u2 blank because pore-pressure measurements are unavailable. The app interprets blank u2 approximately as qc. Assign each file to a different CPT point inside the polygon, at least 2 m apart, and save it in Investigasi. DQN supports counts 1, 2, 3, and 5 from this set when the local window and other model contracts are compatible. Test the 1 CPT state first, then import the additional profiles one at a time. These profiles do not validate recommendation quality or local geology.

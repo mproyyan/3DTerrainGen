@@ -77,6 +77,24 @@ struct CoordinateTransformer: Sendable {
         }
         return result
     }
+    /// Inverse of localMeters for a local project frame, refined against the ECEF projection.
+    static func geographic(east: Double, north: Double, origin: GeoPoint) -> GeoPoint {
+        let latitude = origin.latitude * .pi / 180
+        let eccentricity = 0.0066943799901413165
+        let sinLat = sin(latitude)
+        let denominator = sqrt(1 - eccentricity * sinLat * sinLat)
+        let eastRadius = 6378137.0 / denominator * cos(latitude)
+        let northRadius = 6378137.0 * (1 - eccentricity) / pow(1 - eccentricity * sinLat * sinLat, 1.5)
+        var result = GeoPoint(longitude: origin.longitude + east / eastRadius * 180 / .pi,
+                              latitude: origin.latitude + north / northRadius * 180 / .pi)
+        for _ in 0..<3 {
+            let actual = localMeters(result, origin: origin)
+            result = GeoPoint(longitude: result.longitude + (east - actual.x) / eastRadius * 180 / .pi,
+                              latitude: result.latitude + (north - actual.y) / northRadius * 180 / .pi)
+        }
+        return result
+    }
+
     /// WGS 84 ECEF projected onto the origin's east/north axes. Height is kept separately.
     static func localMeters(_ geo: GeoPoint, origin: GeoPoint) -> Point2 {
         func ecef(_ g: GeoPoint) -> SIMD3<Double> {

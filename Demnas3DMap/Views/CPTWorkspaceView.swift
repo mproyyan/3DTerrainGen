@@ -43,7 +43,7 @@ struct CPTWorkspaceView: View {
                 }
                 Section("Langkah berikutnya") {
                     if let location = session.recommendation {
-                        Text("Kandidat terjauh dari titik yang sudah diuji. Ini rekomendasi geometris simulasi; akses lapangan belum diperhitungkan.")
+                        Text(session.recommendationSource == .dqn ? "DQN: kandidat dengan Q-value tertinggi pada satu grid valid. Akses lapangan belum diperhitungkan." : session.recommendationSource == .dqnWindowedExperimental ? "DQN Windowed Experimental: kandidat Q-value tertinggi dari satu window yang dipilih sebelum inference. Belum tervalidasi terhadap ground truth." : "Heuristic: kandidat terjauh dari titik yang sudah diuji. Ini fallback, bukan rekomendasi DQN; akses lapangan belum diperhitungkan.")
                         Text(String(format: "%.6f, %.6f", location.latitude, location.longitude)).font(.caption.monospaced())
                         Button("Tetapkan titik rekomendasi", systemImage: "mappin.and.ellipse") {
                             do { try session.addCPT(at: location) }
@@ -60,8 +60,12 @@ struct CPTWorkspaceView: View {
                     Button("Kembali ke peta") { dismiss() }
                 }
                 Section("Model PoC") {
-                    Text("Warna lapisan mengikuti interpretasi profil terdekat. Area abu-abu belum didukung radius simulasi. Model kolom tidak menghubungkan stratigrafi secara geologis.")
-                    Text("Kekuatan, batas lapisan, dan cakupan belum tervalidasi untuk desain. DRL dan SchemaGAN belum digunakan.")
+                    Text("Model C: \(session.reconstructionStatus.rawValue)")
+                    if let error = session.reconstructionError { Text(error).foregroundStyle(.orange) }
+                    Text("DQN: \(session.dqnStatus.rawValue). Rekonstruktor SchemaGAN V3 yang cocok dengan training DQN dijalankan terpisah dari Model C.")
+                    if let reason = session.dqnError { Text("Alasan fallback DQN: \(reason)").foregroundStyle(.orange) }
+                    Text(session.reconstruction == nil ? "Fallback: warna lapisan mengikuti profil CPT terdekat; area abu-abu belum didukung radius simulasi." : "Volume Ic Model C eksperimental terlihat pada tampilan 3D. Kolom fallback disembunyikan saat volume tersedia.")
+                    Text("Kekuatan, batas lapisan, dan cakupan belum tervalidasi untuk desain. Sumber rekomendasi: \(session.recommendationSource.rawValue).")
                     if let date = session.savedAt { Text("Tersimpan lokal: \(date.formatted(date: .abbreviated, time: .shortened))").font(.caption) }
                 }.font(.footnote)
             }

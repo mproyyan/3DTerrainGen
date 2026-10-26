@@ -124,8 +124,9 @@ struct PolygonSelectionModel {
     mutating func finish() throws {
         let points = coordinates.map { GeoPoint($0) }
         try Geometry.validate(points.map(\.point))
-        guard let first = points.first, points.allSatisfy({ abs($0.longitude - first.longitude) < 1 && abs($0.latitude - first.latitude) < 1 }) else {
-            throw TerrainError("Select a local area smaller than one degree. Antimeridian-crossing selections are unsupported.")
+        let longitudes = points.map(\.longitude)
+        guard (longitudes.max()! - longitudes.min()!) < 180 else {
+            throw TerrainError("Antimeridian-crossing selections are unsupported.")
         }
         isFinished = true
     }

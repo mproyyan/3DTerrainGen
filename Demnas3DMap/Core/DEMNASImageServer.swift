@@ -30,10 +30,6 @@ enum DEMNASImageServer {
 
     static func request(for polygon: [GeoPoint]) throws -> ExportRequest {
         try Geometry.validate(polygon.map(\.point))
-        guard let origin = polygon.first,
-              polygon.allSatisfy({ CoordinateTransformer.localMeters($0, origin: origin).length < 25_000 }) else {
-            throw TerrainError("Choose a local area within 25 km of the first vertex. Larger areas need a curved-earth terrain renderer.")
-        }
 
         let west = polygon.map(\.longitude).min()!, east = polygon.map(\.longitude).max()!
         let south = polygon.map(\.latitude).min()!, north = polygon.map(\.latitude).max()!
