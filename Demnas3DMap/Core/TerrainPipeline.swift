@@ -9,9 +9,10 @@ protocol DEMRasterSource {
 final class GeoTIFFSource: DEMRasterSource {
     let reader: TIFFReader
     let metadata: DEMMetadata
-    init(url: URL, confirmedDEMNAS: Bool) throws {
+    init(url: URL, confirmedDEMNAS: Bool, manualEPSG: Int? = nil) throws {
         reader = try TIFFReader(url: url)
-        metadata = try DEMMetadataValidator.validate(reader, companion: CompanionMetadata.read(beside: url), confirmedDEMNAS: confirmedDEMNAS)
+        metadata = try DEMMetadataValidator.validate(reader, companion: CompanionMetadata.read(beside: url),
+                                                     confirmedDEMNAS: confirmedDEMNAS, manualEPSG: manualEPSG)
     }
     /// The ImageServer request defines the output extent and spatial reference,
     /// so its metadata is authoritative even when the returned TIFF omits tags.
@@ -23,6 +24,44 @@ final class GeoTIFFSource: DEMRasterSource {
         self.metadata = metadata
     }
     func sample(column: Int, row: Int) throws -> Double { try reader.sample(column: column, row: row) }
+}
+
+struct ImportedDEM: Sendable {
+    let url: URL
+    let directory: URL
+    let metadata: DEMMetadata
+    let confirmedDEMNAS: Bool
+    let manualEPSG: Int?
+}
+
+enum DEMImporter {
+    /// Copy while security-scoped access is active. A source never outlives its permission.
+    static func load(urls: [URL], confirmedDEMNAS: Bool, manualEPSG: Int? = nil) throws -> ImportedDEM {
+        let rasters = urls.filter { ["tif","tiff"].contains($0.pathExtension.lowercased()) }
+        guard rasters.count == 1, let raster = rasters.first else { throw TerrainError("Select exactly one .tif/.tiff DEM, optionally with its matching .tfw, .prj, or .tif.aux.xml companions.") }
+        let fm = FileManager.default
+        let directory = fm.temporaryDirectory.appendingPathComponent("DEMNAS-\(UUID().uuidString)", isDirectory: true)
+        try fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        do {
+            let base = raster.deletingPathExtension().lastPathComponent.lowercased()
+            let accepted = Set([raster.lastPathComponent.lowercased(), base+".tfw",base+".tifw",base+".wld",base+".prj",raster.lastPathComponent.lowercased()+".aux.xml"])
+            guard urls.count <= 7 else { throw TerrainError("Select only the DEM and its companion metadata.") }
+            for url in urls {
+                try Task.checkCancellation()
+                guard accepted.contains(url.lastPathComponent.lowercased()) else { throw TerrainError("\(url.lastPathComponent) does not match the selected DEM's basename.") }
+                let access = url.startAccessingSecurityScopedResource()
+                defer { if access { url.stopAccessingSecurityScopedResource() } }
+                let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? Int.max
+                guard size <= (url == raster ? 2_000_000_000 : 1_000_000) else { throw TerrainError("DEM files are limited to 2 GB and companion files to 1 MB.") }
+                let destination = directory.appendingPathComponent(url.lastPathComponent.lowercased())
+                try fm.copyItem(at: url, to: destination)
+            }
+            let local = directory.appendingPathComponent(raster.lastPathComponent.lowercased())
+            let source = try GeoTIFFSource(url: local, confirmedDEMNAS: confirmedDEMNAS, manualEPSG: manualEPSG)
+            return .init(url: local, directory: directory, metadata: source.metadata,
+                         confirmedDEMNAS: confirmedDEMNAS, manualEPSG: manualEPSG)
+        } catch { try? fm.removeItem(at: directory); throw error }
+    }
 }
 
 struct ElevationGrid: Sendable {
