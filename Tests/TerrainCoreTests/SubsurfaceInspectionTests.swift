@@ -64,3 +64,50 @@ private func inspectionVolume(_ grid: ReconstructionGrid, observedX: Int = 2) ->
     #expect(TerrainRaycast.firstHit(origin:[20,5,-2],direction:[0,-1,0],
                                     positions:positions,indices:[0,1,2]) == nil)
 }
+
+@Test func twoRenderedVoxelTapsSelectDifferentExactGridLocations() {
+    let grid = ReconstructionGrid(nx:24,ny:24,nz:12,spacingMeters:2,
+                                  northSpacingMeters:3,depthSpacingMeters:1)
+    let volume = inspectionVolume(grid)
+    let north = volume.north(y:3)
+    let boxes = [2,4].map { x in
+        TerrainRaycast.Box(center:[Float(volume.east(x:x)),0,Float(-north)],size:[2,2,3])
+    }
+    func select(_ east: Double) -> VerticalProfile? {
+        guard let hit = TerrainRaycast.firstBoxHit(
+            origin:[Float(east),5,Float(-north)],direction:[0,-1,0],boxes:boxes) else { return nil }
+        return VerticalProfile.inspect(east:Double(hit.x),north:Double(-hit.z),volumes:[volume],risk:nil)
+    }
+    let first = select(volume.east(x:2))!
+    let second = select(volume.east(x:4))!
+    #expect(first.x == 2 && second.x == 4)
+    #expect(first.east == volume.east(x:2) && second.east == volume.east(x:4))
+    #expect(first.points[0].ic != second.points[0].ic)
+    #expect(select(1000) == nil)
+}
+
+@Test func sceneRulerUsesPhysicalNonUniformGridAndSharedLocalAxes() {
+    let grid = ReconstructionGrid(nx:96,ny:32,nz:16,spacingMeters:1.04,
+                                  northSpacingMeters:1.9375,depthSpacingMeters:1)
+    let volume = inspectionVolume(grid)
+    let ruler = SceneRulerLayout(volumes:[volume],surfaceY:7,depthScale:5)!
+    #expect(abs(ruler.bounds.width-99.84) < 1e-8)
+    #expect(abs(ruler.bounds.height-62) < 1e-8)
+    #expect(ruler.depthMeters == 16)
+    let origin = ruler.point(east:ruler.bounds.west,north:ruler.bounds.south,depth:0)
+    let xEnd = ruler.point(east:ruler.bounds.east,north:ruler.bounds.south,depth:0)
+    let yEnd = ruler.point(east:ruler.bounds.west,north:ruler.bounds.north,depth:0)
+    let down = ruler.point(east:ruler.bounds.west,north:ruler.bounds.south,depth:16)
+    #expect(abs(Double(xEnd.x-origin.x)-99.84) < 1e-4)
+    #expect(abs(Double(yEnd.z-origin.z)+62) < 1e-5)
+    #expect(abs(Double(down.y-origin.y)+80) < 1e-5)
+    #expect(SceneRulerLayout.tickValues(length:ruler.bounds.width).last == ruler.bounds.width)
+    #expect(SceneRulerLayout.tickValues(length:16) == [0,5,10,16])
+    #expect(SceneRulerLayout.tickValues(length:62).count <= 7)
+    let nextProject = inspectionVolume(.init(nx:24,ny:24,nz:12,spacingMeters:2,
+                                             northSpacingMeters:3,depthSpacingMeters:0.5))
+    let nextRuler = SceneRulerLayout(volumes:[nextProject],surfaceY:7,depthScale:1)!
+    #expect(nextRuler.bounds.width == 48)
+    #expect(nextRuler.bounds.height == 72)
+    #expect(nextRuler.depthMeters == 6)
+}
