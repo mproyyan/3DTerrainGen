@@ -1,0 +1,371 @@
+{
+  "protocol": "six-field-CPT-known-site-retrospective-pilot-v1",
+  "scenario": "dry_gamma18",
+  "field_profiles_sha256": "9be3a0892702905ba095fcdc0a069818cee10b9bd2c9d8283c2090b2735ead95",
+  "field_metadata_sha256": "9698d4d4577d1a3649de13c11fd10b48a2313c328d8ac42d46ce8cc29a4fb9b8",
+  "field_metadata_coordinate_accuracy_verified": false,
+  "schemaGAN_checkpoint_sha256": "5694bb7b43efd7054a99fac8b74dadc5d74ebe6d291f42a8393b57fe9da52b64",
+  "DQN_checkpoint_sha256": "687539d5ad2606b198f2aadfaa6761bc9d9968ec8ce1fd2c915350413530345a",
+  "truth_scope": "six measured CPT profiles only; no whole-area ground truth",
+  "candidate_scope": "only five other measured CPT sites per start, access masked",
+  "common_mask": "same CPT profiles hidden from both policies at each stage",
+  "independence_limit": "six starts reuse the same field site; exploratory, not independent trials",
+  "summary": {
+    "2": {
+      "starts": 6,
+      "mean_dqn_rmse": 0.4675877590974172,
+      "mean_uniform_rmse": 0.43279702216386795,
+      "mean_paired_dqn_minus_uniform_rmse": 0.03479073693354925,
+      "dqn_lower_rmse_starts": 0,
+      "mean_dqn_coverage_distance_m": 7.978411191455858,
+      "mean_uniform_coverage_distance_m": 8.545177628029577
+    },
+    "3": {
+      "starts": 6,
+      "mean_dqn_rmse": 0.3825303961833318,
+      "mean_uniform_rmse": 0.35648298263549805,
+      "mean_paired_dqn_minus_uniform_rmse": 0.02604741354783376,
+      "dqn_lower_rmse_starts": 2,
+      "mean_dqn_coverage_distance_m": 7.085839804530611,
+      "mean_uniform_coverage_distance_m": 7.092172589550153
+    }
+  },
+  "cases": [
+    {
+      "initial_cpt": "IMC084",
+      "observed_cpt_count": 2,
+      "policy": "dqn",
+      "selected_xy": [
+        3,
+        14
+      ],
+      "selected_distance_m": 19.1049731745428,
+      "legal_known_site_candidates": 5,
+      "common_hidden_cpt_count": 4,
+      "common_hidden_ic_rmse": 0.5109973549842834,
+      "mean_grid_distance_to_cpt_m": 8.661772076431046
+    },
+    {
+      "initial_cpt": "IMC084",
+      "observed_cpt_count": 2,
+      "policy": "uniform",
+      "selected_xy": [
+        3,
+        14
+      ],
+      "selected_distance_m": 19.1049731745428,
+      "legal_known_site_candidates": 5,
+      "common_hidden_cpt_count": 4,
+      "common_hidden_ic_rmse": 0.5109973549842834,
+      "mean_grid_distance_to_cpt_m": 8.661772076431046
+    },
+    {
+      "initial_cpt": "IMC084",
+      "observed_cpt_count": 3,
+      "policy": "dqn",
+      "selected_xy": [
+        1,
+        5
+      ],
+      "selected_distance_m": 9.219544457292887,
+      "legal_known_site_candidates": 4,
+      "common_hidden_cpt_count": 2,
+      "common_hidden_ic_rmse": 0.44327354431152344,
+      "mean_grid_distance_to_cpt_m": 7.877923473755484
+    },
+    {
+      "initial_cpt": "IMC084",
+      "observed_cpt_count": 3,
+      "policy": "uniform",
+      "selected_xy": [
+        21,
+        10
+      ],
+      "selected_distance_m": 9.848857801796104,
+      "legal_known_site_candidates": 4,
+      "common_hidden_cpt_count": 2,
+      "common_hidden_ic_rmse": 0.48267269134521484,
+      "mean_grid_distance_to_cpt_m": 6.819380741649658
+    },
+    {
+      "initial_cpt": "IMC085",
+      "observed_cpt_count": 2,
+      "policy": "dqn",
+      "selected_xy": [
+        3,
+        14
+      ],
+      "selected_distance_m": 16.492422502470642,
+      "legal_known_site_candidates": 5,
+      "common_hidden_cpt_count": 3,
+      "common_hidden_ic_rmse": 0.5650283098220825,
+      "mean_grid_distance_to_cpt_m": 7.4411505141122785
+    },
+    {
+      "initial_cpt": "IMC085",
+      "observed_cpt_count": 2,
+      "policy": "uniform",
+      "selected_xy": [
+        1,
+        5
+      ],
+      "selected_distance_m": 18.681541692269406,
+      "legal_known_site_candidates": 5,
+      "common_hidden_cpt_count": 3,
+      "common_hidden_ic_rmse": 0.5491577386856079,
+      "mean_grid_distance_to_cpt_m": 8.333437773861556
+    },
+    {
+      "initial_cpt": "IMC085",
+      "observed_cpt_count": 3,
+      "policy": "dqn",
+      "selected_xy": [
+        1,
+        5
+      ],
+      "selected_distance_m": 9.219544457292887,
+      "legal_known_site_candidates": 4,
+      "common_hidden_cpt_count": 3,
+      "common_hidden_ic_rmse": 0.5619462728500366,
+      "mean_grid_distance_to_cpt_m": 6.5079580565305735
+    },
+    {
+      "initial_cpt": "IMC085",
+      "observed_cpt_count": 3,
+      "policy": "uniform",
+      "selected_xy": [
+        3,
+        14
+      ],
+      "selected_distance_m": 9.219544457292887,
+      "legal_known_site_candidates": 4,
+      "common_hidden_cpt_count": 3,
+      "common_hidden_ic_rmse": 0.5619462728500366,
+      "mean_grid_distance_to_cpt_m": 6.5079580565305735
+    },
+    {
+      "initial_cpt": "IMC086",
+      "observed_cpt_count": 2,
+      "policy": "dqn",
+      "selected_xy": [
+        3,
+        14
+      ],
+      "selected_distance_m": 18.439088914585774,
+      "legal_known_site_candidates": 5,
+      "common_hidden_cpt_count": 3,
+      "common_hidden_ic_rmse": 0.4206019937992096,
+      "mean_grid_distance_to_cpt_m": 7.754272862718882
+    },
+    {
+      "initial_cpt": "IMC086",
+      "observed_cpt_count": 2,
+      "policy": "uniform",
+      "selected_xy": [
+        1,
+        5
+      ],
+      "selected_distance_m": 20.615528128088304,
+      "legal_known_site_candidates": 5,
+      "common_hidden_cpt_count": 3,
+      "common_hidden_ic_rmse": 0.4093945324420929,
+      "mean_grid_distance_to_cpt_m": 8.767681372251168
+    },
+    {
+      "initial_cpt": "IMC086",
+      "observed_cpt_count": 3,
+      "policy": "dqn",
+      "selected_xy": [
+        19,
+        10
+      ],
+      "selected_distance_m": 2.0,
+      "legal_known_site_candidates": 4,
+      "common_hidden_cpt_count": 1,
+      "common_hidden_ic_rmse": 0.18284747004508972,
+      "mean_grid_distance_to_cpt_m": 7.3430814994684885
+    },
+    {
+      "initial_cpt": "IMC086",
+      "observed_cpt_count": 3,
+      "policy": "uniform",
+      "selected_xy": [
+        17,
+        1
+      ],
+      "selected_distance_m": 9.848857801796104,
+      "legal_known_site_candidates": 4,
+      "common_hidden_cpt_count": 1,
+      "common_hidden_ic_rmse": 0.1856289654970169,
+      "mean_grid_distance_to_cpt_m": 8.025755427988887
+    },
+    {
+      "initial_cpt": "IMC087",
+      "observed_cpt_count": 2,
+      "policy": "dqn",
+      "selected_xy": [
+        3,
+        14
+      ],
+      "selected_distance_m": 9.899494936611665,
+      "legal_known_site_candidates": 5,
+      "common_hidden_cpt_count": 3,
+      "common_hidden_ic_rmse": 0.44674575328826904,
+      "mean_grid_distance_to_cpt_m": 8.238683407499106
+    },
+    {
+      "initial_cpt": "IMC087",
+      "observed_cpt_count": 2,
+      "policy": "uniform",
+      "selected_xy": [
+        21,
+        10
+      ],
+      "selected_distance_m": 11.40175425099138,
+      "legal_known_site_candidates": 5,
+      "common_hidden_cpt_count": 3,
+      "common_hidden_ic_rmse": 0.42740246653556824,
+      "mean_grid_distance_to_cpt_m": 8.078721096951483
+    },
+    {
+      "initial_cpt": "IMC087",
+      "observed_cpt_count": 3,
+      "policy": "dqn",
+      "selected_xy": [
+        1,
+        5
+      ],
+      "selected_distance_m": 9.219544457292887,
+      "legal_known_site_candidates": 4,
+      "common_hidden_cpt_count": 2,
+      "common_hidden_ic_rmse": 0.5075904726982117,
+      "mean_grid_distance_to_cpt_m": 7.770159684367972
+    },
+    {
+      "initial_cpt": "IMC087",
+      "observed_cpt_count": 3,
+      "policy": "uniform",
+      "selected_xy": [
+        3,
+        14
+      ],
+      "selected_distance_m": 9.899494936611665,
+      "legal_known_site_candidates": 4,
+      "common_hidden_cpt_count": 2,
+      "common_hidden_ic_rmse": 0.5020018219947815,
+      "mean_grid_distance_to_cpt_m": 6.354805141493259
+    },
+    {
+      "initial_cpt": "IMC088",
+      "observed_cpt_count": 2,
+      "policy": "dqn",
+      "selected_xy": [
+        19,
+        10
+      ],
+      "selected_distance_m": 18.681541692269406,
+      "legal_known_site_candidates": 5,
+      "common_hidden_cpt_count": 3,
+      "common_hidden_ic_rmse": 0.3537767231464386,
+      "mean_grid_distance_to_cpt_m": 8.333437773861556
+    },
+    {
+      "initial_cpt": "IMC088",
+      "observed_cpt_count": 2,
+      "policy": "uniform",
+      "selected_xy": [
+        21,
+        10
+      ],
+      "selected_distance_m": 20.615528128088304,
+      "legal_known_site_candidates": 5,
+      "common_hidden_cpt_count": 3,
+      "common_hidden_ic_rmse": 0.20313729345798492,
+      "mean_grid_distance_to_cpt_m": 8.767681372251168
+    },
+    {
+      "initial_cpt": "IMC088",
+      "observed_cpt_count": 3,
+      "policy": "dqn",
+      "selected_xy": [
+        3,
+        14
+      ],
+      "selected_distance_m": 9.219544457292887,
+      "legal_known_site_candidates": 4,
+      "common_hidden_cpt_count": 1,
+      "common_hidden_ic_rmse": 0.2997623085975647,
+      "mean_grid_distance_to_cpt_m": 6.5079580565305735
+    },
+    {
+      "initial_cpt": "IMC088",
+      "observed_cpt_count": 3,
+      "policy": "uniform",
+      "selected_xy": [
+        17,
+        1
+      ],
+      "selected_distance_m": 9.848857801796104,
+      "legal_known_site_candidates": 4,
+      "common_hidden_cpt_count": 1,
+      "common_hidden_ic_rmse": 0.1856289654970169,
+      "mean_grid_distance_to_cpt_m": 8.025755427988887
+    },
+    {
+      "initial_cpt": "IMC090",
+      "observed_cpt_count": 2,
+      "policy": "dqn",
+      "selected_xy": [
+        19,
+        10
+      ],
+      "selected_distance_m": 16.492422502470642,
+      "legal_known_site_candidates": 5,
+      "common_hidden_cpt_count": 3,
+      "common_hidden_ic_rmse": 0.50837641954422,
+      "mean_grid_distance_to_cpt_m": 7.4411505141122785
+    },
+    {
+      "initial_cpt": "IMC090",
+      "observed_cpt_count": 2,
+      "policy": "uniform",
+      "selected_xy": [
+        17,
+        1
+      ],
+      "selected_distance_m": 19.1049731745428,
+      "legal_known_site_candidates": 5,
+      "common_hidden_cpt_count": 3,
+      "common_hidden_ic_rmse": 0.4966927468776703,
+      "mean_grid_distance_to_cpt_m": 8.661772076431046
+    },
+    {
+      "initial_cpt": "IMC090",
+      "observed_cpt_count": 3,
+      "policy": "dqn",
+      "selected_xy": [
+        1,
+        5
+      ],
+      "selected_distance_m": 9.219544457292887,
+      "legal_known_site_candidates": 4,
+      "common_hidden_cpt_count": 1,
+      "common_hidden_ic_rmse": 0.2997623085975647,
+      "mean_grid_distance_to_cpt_m": 6.5079580565305735
+    },
+    {
+      "initial_cpt": "IMC090",
+      "observed_cpt_count": 3,
+      "policy": "uniform",
+      "selected_xy": [
+        21,
+        10
+      ],
+      "selected_distance_m": 9.848857801796104,
+      "legal_known_site_candidates": 4,
+      "common_hidden_cpt_count": 1,
+      "common_hidden_ic_rmse": 0.2210191786289215,
+      "mean_grid_distance_to_cpt_m": 6.819380741649658
+    }
+  ]
+}

@@ -239,11 +239,23 @@ enum InvestigationSimulator {
 }
 
 extension TerrainMesh {
+    func markerCenter(at geo: GeoPoint, radius: Float) -> SIMD3<Float>? {
+        guard radius.isFinite, radius > 0, let surface = surfacePosition(at: geo) else { return nil }
+        // The sphere rests on its supporting mesh triangle in the same local frame.
+        return surface + SIMD3<Float>(0, radius, 0)
+    }
     func surfacePosition(at geo: GeoPoint) -> SIMD3<Float>? {
         let p = CoordinateTransformer.localMeters(geo, origin: origin)
         return surfacePosition(x: Float(p.x), z: Float(-p.y))
     }
+    func surfaceSample(at geo: GeoPoint) -> (position: SIMD3<Float>, triangle: Int)? {
+        let p = CoordinateTransformer.localMeters(geo, origin: origin)
+        return surfaceSample(x: Float(p.x), z: Float(-p.y))
+    }
     func surfacePosition(x: Float, z: Float) -> SIMD3<Float>? {
+        surfaceSample(x:x,z:z)?.position
+    }
+    func surfaceSample(x: Float, z: Float) -> (position: SIMD3<Float>, triangle: Int)? {
         let p = Point2(x: Double(x), y: Double(z))
         for i in stride(from: 0, to: indices.count, by: 3) {
             let va = positions[Int(indices[i])], vb = positions[Int(indices[i+1])], vc = positions[Int(indices[i+2])]
@@ -255,7 +267,7 @@ extension TerrainMesh {
             if abs(denominator) < 1e-12 { continue }
             let u = Geometry.cross(p-a,c-a)/denominator, w = Geometry.cross(b-a,p-a)/denominator
             if u >= -1e-6 && w >= -1e-6 && u+w <= 1+1e-6 {
-                return .init(x, Float(Double(va.y)*(1-u-w)+Double(vb.y)*u+Double(vc.y)*w), z)
+                return (.init(x, Float(Double(va.y)*(1-u-w)+Double(vb.y)*u+Double(vc.y)*w), z), i/3)
             }
         }
         return nil

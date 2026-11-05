@@ -9,9 +9,12 @@ protocol DEMRasterSource {
 final class GeoTIFFSource: DEMRasterSource {
     let reader: TIFFReader
     let metadata: DEMMetadata
-    init(url: URL, confirmedDEMNAS: Bool) throws {
+    init(url: URL, confirmedDEMNAS: Bool, manualEPSG: Int? = nil,
+         verticalMetresWithUnknownDatum: Bool = false) throws {
         reader = try TIFFReader(url: url)
-        metadata = try DEMMetadataValidator.validate(reader, companion: CompanionMetadata.read(beside: url), confirmedDEMNAS: confirmedDEMNAS)
+        metadata = try DEMMetadataValidator.validate(reader, companion: CompanionMetadata.read(beside: url),
+                                                     confirmedDEMNAS: confirmedDEMNAS, manualEPSG: manualEPSG,
+                                                     verticalMetresWithUnknownDatum: verticalMetresWithUnknownDatum)
     }
     /// The ImageServer request defines the output extent and spatial reference,
     /// so its metadata is authoritative even when the returned TIFF omits tags.
@@ -23,6 +26,69 @@ final class GeoTIFFSource: DEMRasterSource {
         self.metadata = metadata
     }
     func sample(column: Int, row: Int) throws -> Double { try reader.sample(column: column, row: row) }
+}
+
+struct ImportedDEM: Sendable {
+    let url: URL
+    let directory: URL
+    let metadata: DEMMetadata
+    let confirmedDEMNAS: Bool
+    let manualEPSG: Int?
+    let verticalMetresWithUnknownDatum: Bool
+}
+
+enum DEMImporter {
+    /// Copy the selected files while their security-scoped access is active.
+    static func load(urls: [URL], confirmedDEMNAS: Bool, manualEPSG: Int? = nil,
+                     verticalMetresWithUnknownDatum: Bool = false) throws -> ImportedDEM {
+        if urls.count == 1, let archive = urls.first, archive.pathExtension.lowercased() == "zip" {
+            let directory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("DEM-archive-\(UUID().uuidString)", isDirectory: true)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let extracted = try DEMZIPArchive.extract(url: archive, into: directory)
+            return try load(urls: extracted, confirmedDEMNAS: confirmedDEMNAS, manualEPSG: manualEPSG,
+                            verticalMetresWithUnknownDatum: verticalMetresWithUnknownDatum)
+        }
+        if urls.contains(where: { $0.pathExtension.lowercased() == "zip" }) {
+            throw TerrainError("Pilih hanya satu ZIP DEM, atau pilih langsung satu .tif/.tiff beserta file metadata pendampingnya.")
+        }
+        let rasters = urls.filter { ["tif", "tiff"].contains($0.pathExtension.lowercased()) }
+        guard rasters.count == 1, let raster = rasters.first else {
+            throw TerrainError("Pilih satu file .tif/.tiff dan, jika perlu, file .tfw, .prj, atau .tif.aux.xml yang sesuai.")
+        }
+        let fm = FileManager.default
+        let directory = fm.temporaryDirectory.appendingPathComponent("DEM-import-\(UUID().uuidString)", isDirectory: true)
+        try fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        do {
+            let base = raster.deletingPathExtension().lastPathComponent.lowercased()
+            let accepted = Set([raster.lastPathComponent.lowercased(), base + ".tfw", base + ".tifw",
+                                base + ".wld", base + ".prj", raster.lastPathComponent.lowercased() + ".aux.xml"])
+            guard urls.count <= 7 else { throw TerrainError("Pilih hanya DEM dan metadata pendampingnya.") }
+            for url in urls {
+                try Task.checkCancellation()
+                let name = url.lastPathComponent.lowercased()
+                guard accepted.contains(name) else { throw TerrainError("\(url.lastPathComponent) tidak cocok dengan nama DEM.") }
+                let access = url.startAccessingSecurityScopedResource()
+                defer { if access { url.stopAccessingSecurityScopedResource() } }
+                let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? Int.max
+                guard size <= (url == raster ? 2_000_000_000 : 1_000_000) else {
+                    throw TerrainError("Ukuran DEM maksimal 2 GB dan metadata pendamping maksimal 1 MB.")
+                }
+                let destination = directory.appendingPathComponent(name)
+                guard !fm.fileExists(atPath: destination.path) else { throw TerrainError("File metadata dipilih lebih dari sekali.") }
+                try fm.copyItem(at: url, to: destination)
+            }
+            let local = directory.appendingPathComponent(raster.lastPathComponent.lowercased())
+            let source = try GeoTIFFSource(url: local, confirmedDEMNAS: confirmedDEMNAS, manualEPSG: manualEPSG,
+                                           verticalMetresWithUnknownDatum: verticalMetresWithUnknownDatum)
+            return .init(url: local, directory: directory, metadata: source.metadata,
+                         confirmedDEMNAS: confirmedDEMNAS, manualEPSG: manualEPSG,
+                         verticalMetresWithUnknownDatum: verticalMetresWithUnknownDatum)
+        } catch {
+            try? fm.removeItem(at: directory)
+            throw error
+        }
+    }
 }
 
 struct ElevationGrid: Sendable {

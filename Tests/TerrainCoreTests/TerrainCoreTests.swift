@@ -279,6 +279,98 @@ private let boundary = [Point2(x:1,y:1),Point2(x:4.8,y:1.2),Point2(x:4.1,y:4.6),
     }
 }
 
+@Test func manualDEMImportCopiesCompanionsAndCanAssignMissingCRS() throws {
+    var fixture = Fixture()
+    fixture.epsg = nil
+    try fixture.withFile { url in
+        #expect(throws: TerrainError.self) { try DEMImporter.load(urls: [url], confirmedDEMNAS: false) }
+        let manual = try DEMImporter.load(urls: [url], confirmedDEMNAS: false, manualEPSG: 4326)
+        defer { try? FileManager.default.removeItem(at: manual.directory) }
+        #expect(manual.metadata.epsg == 4326)
+        #expect(FileManager.default.fileExists(atPath: manual.url.path))
+
+        let sidecar = url.deletingPathExtension().appendingPathExtension("prj")
+        try "EPSG:4326".write(to: sidecar, atomically: true, encoding: .utf8)
+        let accompanied = try DEMImporter.load(urls: [url, sidecar], confirmedDEMNAS: false)
+        defer { try? FileManager.default.removeItem(at: accompanied.directory) }
+        #expect(accompanied.metadata.epsg == 4326)
+        #expect(FileManager.default.fileExists(atPath: accompanied.url.deletingPathExtension().appendingPathExtension("prj").path))
+    }
+}
+
+private func demZIP(name: String, contents: Data, deflated: Bool) throws -> Data {
+    func little(_ value: Int, _ count: Int) -> Data {
+        Data((0..<count).map { UInt8((value >> ($0 * 8)) & 255) })
+    }
+    var compressed = contents
+    if deflated {
+        var stream = z_stream()
+        #expect(deflateInit2_(&stream, Z_DEFAULT_COMPRESSION, Z_DEFLATED, -15, 8,
+                              Z_DEFAULT_STRATEGY, ZLIB_VERSION, Int32(MemoryLayout<z_stream>.size)) == Z_OK)
+        defer { deflateEnd(&stream) }
+        var buffer = Data(count: Int(compressBound(uLong(contents.count))))
+        let capacity = buffer.count
+        let status = contents.withUnsafeBytes { source in
+            buffer.withUnsafeMutableBytes { target -> Int32 in
+                stream.next_in = UnsafeMutablePointer(mutating: source.bindMemory(to: Bytef.self).baseAddress!)
+                stream.avail_in = uInt(contents.count)
+                stream.next_out = target.bindMemory(to: Bytef.self).baseAddress!
+                stream.avail_out = uInt(capacity)
+                return deflate(&stream, Z_FINISH)
+            }
+        }
+        #expect(status == Z_STREAM_END)
+        compressed = buffer.prefix(Int(stream.total_out))
+    }
+    let nameData = Data(name.utf8)
+    let crc = contents.withUnsafeBytes { crc32(0, $0.bindMemory(to: Bytef.self).baseAddress, uInt(contents.count)) }
+    let method = deflated ? 8 : 0
+    var local = little(0x04034b50, 4) + little(20, 2) + little(0, 2) + little(method, 2)
+    local += little(0, 4) + little(Int(crc), 4) + little(compressed.count, 4) + little(contents.count, 4)
+    local += little(nameData.count, 2) + little(0, 2) + nameData + compressed
+    var central = little(0x02014b50, 4) + little(20, 2) + little(20, 2) + little(0, 2) + little(method, 2)
+    central += little(0, 4) + little(Int(crc), 4) + little(compressed.count, 4) + little(contents.count, 4)
+    central += little(nameData.count, 2) + little(0, 2) + little(0, 2) + little(0, 2)
+    central += little(0, 2) + little(0, 4) + little(0, 4) + nameData
+    let end = little(0x06054b50, 4) + little(0, 4) + little(1, 2) + little(1, 2)
+        + little(central.count, 4) + little(local.count, 4) + little(0, 2)
+    return local + central + end
+}
+
+@Test(arguments: [false, true]) func manualDEMImportReadsZIP(deflated: Bool) throws {
+    var fixture = Fixture()
+    fixture.epsg = nil
+    try fixture.withFile { url in
+        let archive = url.deletingLastPathComponent().appendingPathComponent("DEM_Reprojected.tif.zip")
+        try demZIP(name: "folder/dem.tif", contents: Data(contentsOf: url), deflated: deflated).write(to: archive)
+        let imported = try DEMImporter.load(urls: [archive], confirmedDEMNAS: false, manualEPSG: 4326)
+        defer { try? FileManager.default.removeItem(at: imported.directory) }
+        #expect(imported.metadata.epsg == 4326)
+        #expect(imported.url.lastPathComponent == "dem.tif")
+        #expect(try GeoTIFFSource(url: imported.url, confirmedDEMNAS: false, manualEPSG: 4326).reader.sample(column: 2, row: 3) == 132)
+    }
+}
+
+@Test func uploadedDEMZIPUsesItsEmbeddedUTMWhenAvailable() throws {
+    guard let path = ProcessInfo.processInfo.environment["DEM_UPLOAD_ZIP"] else { return }
+    let imported = try DEMImporter.load(urls: [URL(fileURLWithPath: path)], confirmedDEMNAS: true)
+    defer { try? FileManager.default.removeItem(at: imported.directory) }
+    #expect(imported.metadata.epsg == 32749)
+    #expect(imported.metadata.width == 3333)
+    #expect(imported.metadata.height == 3343)
+    #expect(imported.metadata.verticalReference.contains("EGM2008"))
+    let source = try GeoTIFFSource(url: imported.url, confirmedDEMNAS: true)
+    let crs = try CoordinateTransformer(epsg: imported.metadata.epsg)
+    let centerX = Double(imported.metadata.width) / 2
+    let centerY = Double(imported.metadata.height) / 2
+    let corners = [Point2(x: centerX - 4, y: centerY - 4), Point2(x: centerX + 4, y: centerY - 4),
+                   Point2(x: centerX + 4, y: centerY + 4), Point2(x: centerX - 4, y: centerY + 4)]
+    let polygon = try corners.map { try crs.unproject(imported.metadata.transform.world($0)) }
+    let grid = try RasterClippingService.clip(source: source, polygon: polygon, maxAxis: 160)
+    let mesh = try TerrainMeshGenerator.generate(grid)
+    #expect(!mesh.indices.isEmpty)
+}
+
 @Test func extremeImageServerSentinelIsRejectedAsInvalidElevation() throws {
     var fixture = Fixture()
     fixture.values[2 * fixture.width + 2] = 1.1342745e38

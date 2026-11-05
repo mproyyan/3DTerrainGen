@@ -1,5 +1,6 @@
 import SwiftUI
 import MapKit
+import UniformTypeIdentifiers
 
 struct TerrainMapView: View {
     @Bindable var session: TerrainSession
@@ -8,12 +9,20 @@ struct TerrainMapView: View {
     @State private var showInvestigation = false
     @State private var selectedPoint: CPTPoint?
     @State private var resetConfirmation = false
+    @State private var showImportOptions = false
+    @State private var showElevationImporter = false
+    @State private var openImporterAfterDismiss = false
+    @State private var importWithManualCRS = false
+    @State private var pendingElevationURLs: [URL] = []
+    @State private var showCRSSelection = false
+    @State private var selectedEPSG = 0
+    @State private var customEPSG = ""
 
     var body: some View {
         NavigationStack {
             MapReader { proxy in
                 Map(position: $camera, interactionModes: .all) {
-                    if let metadata = session.mesh?.metadata {
+                    if let metadata = session.importedDEM?.metadata ?? session.mesh?.metadata {
                         MapPolygon(coordinates: metadata.footprint.map(\.coordinate))
                             .foregroundStyle(.orange.opacity(0.12))
                             .stroke(.orange, style: StrokeStyle(lineWidth: 2, dash: [6,4]))
@@ -38,13 +47,35 @@ struct TerrainMapView: View {
                     if let candidate = session.recommendation {
                         Annotation("", coordinate: candidate.coordinate) {
                             VStack(spacing: 3) {
-                                Text(session.recommendationSource == .dqn ? "DQN" : session.recommendationSource == .dqnWindowedExperimental ? "DQN · eksperimen" : "Heuristic")
+                                Text(session.recommendationSource == .dqnV45 ? "DQN V4.5" : session.recommendationSource == .dqn ? "DQN V3" : session.recommendationSource == .dqnWindowedExperimental ? "DQN V3 · eksperimen" : session.recommendationSource == .explorationHeuristic ? "Eksplorasi · Heuristic" : "Heuristic")
                                     .font(.caption2.bold()).padding(.horizontal, 6).padding(.vertical, 3)
                                     .background(.regularMaterial, in: Capsule())
                                 Image(systemName: "scope").font(.title).foregroundStyle(.pink)
                                     .padding(6).background(.regularMaterial, in: .circle)
                             }
-                            .accessibilityLabel(session.recommendationSource == .dqnWindowedExperimental ? "Rekomendasi DQN window lokal, eksperimental" : session.recommendationSource == .dqn ? "Rekomendasi DQN" : "Rekomendasi Heuristic")
+                            .accessibilityLabel(session.recommendationSource == .dqnV45 ? "Rekomendasi DQN V4.5 Core ML" : session.recommendationSource == .dqnWindowedExperimental ? "Rekomendasi DQN V3 window lokal, eksperimental" : session.recommendationSource == .dqn ? "Rekomendasi DQN" : session.recommendationSource == .explorationHeuristic ? "Titik eksplorasi cakupan, Heuristic geometris" : "Rekomendasi Heuristic")
+                        }
+                    }
+                    if let exploration = session.explorationRecommendation,
+                       session.recommendationSource != .explorationHeuristic {
+                        Annotation("Eksplorasi · Heuristic", coordinate: exploration.coordinate) {
+                            Button { session.chooseRecommendation(.explorationHeuristic) } label: {
+                                Image(systemName: "scope").font(.title2).foregroundStyle(.orange)
+                                    .padding(6).background(.regularMaterial, in: .circle)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Pilih titik eksplorasi Heuristic")
+                        }
+                    }
+                    if let dqn = session.dqnRecommendation,
+                       session.recommendationSource == .explorationHeuristic {
+                        Annotation(session.dqnRecommendationSource == .dqnV45 ? "DQN V4.5" : "DQN V3 · eksperimen", coordinate: dqn.coordinate) {
+                            Button { session.chooseRecommendation(session.dqnRecommendationSource) } label: {
+                                Image(systemName: "scope").font(.title2).foregroundStyle(.pink)
+                                    .padding(6).background(.regularMaterial, in: .circle)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Pilih titik DQN yang tersedia")
                         }
                     }
                     ForEach(Array(session.selection.coordinates.enumerated()), id: \.offset) { index, coordinate in
@@ -71,12 +102,28 @@ struct TerrainMapView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement:.topBarTrailing) {
-                    if let metadata = session.mesh?.metadata {
+                    if let metadata = session.importedDEM?.metadata ?? session.mesh?.metadata {
                         Button("Frame DEM",systemImage:"viewfinder") { frame(metadata.footprint) }
                     }
                 }
             }
             .sheet(isPresented: $showInvestigation) { CPTWorkspaceView(session: session) }
+            .sheet(isPresented: $showImportOptions, onDismiss: {
+                if openImporterAfterDismiss { openImporterAfterDismiss = false; showElevationImporter = true }
+            }) { importOptions }
+            .sheet(isPresented: $showCRSSelection) { crsSelection }
+            .fileImporter(isPresented: $showElevationImporter, allowedContentTypes: [.data], allowsMultipleSelection: true) { result in
+                switch result {
+                case .success(let urls):
+                    if importWithManualCRS {
+                        pendingElevationURLs = urls
+                        showCRSSelection = true
+                    } else {
+                        session.loadElevationFiles(urls)
+                    }
+                case .failure(let error): session.errorMessage = error.localizedDescription
+                }
+            }
             .sheet(item: $selectedPoint) { point in
                 NavigationStack {
                     CPTDetailView(session: session, pointID: point.id)
@@ -87,11 +134,17 @@ struct TerrainMapView: View {
                 Button("Hapus proyek & mulai baru", role: .destructive) { session.reset() }
             }
             .onAppear { if session.mesh != nil { frame(session.selection.coordinates.map { GeoPoint($0) }) } }
+            .onChange(of: session.importedDEM?.url) { _, _ in
+                if let imported = session.importedDEM { frame(imported.metadata.footprint) }
+            }
             .alert("Unable to continue",isPresented:Binding(get:{session.errorMessage != nil},set:{ if !$0 { session.errorMessage = nil } })) {
                 Button("OK",role:.cancel) { session.errorMessage = nil }
             } message: { Text(session.errorMessage ?? "") }
             .navigationDestination(isPresented:$showViewer) {
-                if let mesh = session.mesh { Terrain3DView(terrain:mesh, session: session) }
+                if let mesh = session.mesh {
+                    Terrain3DView(terrain:mesh, session: session)
+                        .id(session.terrainRevision)
+                }
             }
             .onChange(of:session.mesh == nil) { _, missing in if !missing { showViewer = true } }
         }
@@ -100,7 +153,20 @@ struct TerrainMapView: View {
     private var controls: some View {
         VStack(alignment:.leading,spacing:10) {
             if let activity = session.activity {
-                HStack { ProgressView(); Text(activity).font(.subheadline); Spacer(); Button("Cancel") { session.cancel() } }
+                HStack {
+                    ProgressView()
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(activity).font(.subheadline)
+                        if let started = session.activityStartedAt {
+                            TimelineView(.periodic(from: started, by: 1)) { context in
+                                Text("Menunggu \(Int(max(0, context.date.timeIntervalSince(started)))) detik")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    Spacer()
+                    Button("Batal") { session.cancel() }
+                }
             } else if session.mesh != nil {
                 investigationControls
             } else {
@@ -117,14 +183,115 @@ struct TerrainMapView: View {
                         catch { session.errorMessage = error.localizedDescription }
                     }.disabled(session.selection.coordinates.count < 3 || session.selection.isFinished)
                 }.font(.subheadline).labelStyle(.iconOnly)
+                if let imported = session.importedDEM {
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text(imported.url.lastPathComponent).font(.caption.bold()).lineLimit(1)
+                            Text("\(imported.metadata.width) × \(imported.metadata.height) · EPSG:\(imported.metadata.epsg)")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                    }
+                    Text("Oranye: cakupan DEM · Biru: poligon pilihan")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
                 HStack {
+                    Button(session.importedDEM == nil ? "Impor DEM" : "Ganti DEM") { showImportOptions = true }
+                        .buttonStyle(.bordered)
                     Spacer()
-                    Button("Ambil DEMNAS & Buat 3D",systemImage:"mountain.2.fill") { session.fetchDEMNASAndGenerate() }
-                        .buttonStyle(.borderedProminent).disabled(!session.selection.isFinished)
+                    if session.importedDEM != nil {
+                        Button("Buat 3D dari file") { session.generateFromImportedDEM() }
+                            .buttonStyle(.borderedProminent).disabled(!session.selection.isFinished)
+                        Button("API") { session.fetchDEMNASAndGenerate() }
+                            .buttonStyle(.bordered).disabled(!session.selection.isFinished)
+                    } else {
+                        Button("Ambil DEMNAS & Buat 3D",systemImage:"mountain.2.fill") { session.fetchDEMNASAndGenerate() }
+                            .buttonStyle(.borderedProminent).disabled(!session.selection.isFinished)
+                    }
                 }.font(.subheadline)
+                Text("Pilih GeoTIFF atau ZIP berisi satu GeoTIFF. Elevasi dan cakupannya harus sesuai poligon.")
+                    .font(.caption2).foregroundStyle(.secondary)
             }
         }
         .padding().background(.regularMaterial)
+    }
+    private var importOptions: some View {
+        NavigationStack {
+            Form {
+                Section("Impor GeoTIFF elevasi") {
+                    Text("Pilih satu .tif/.tiff atau ZIP berisi satu GeoTIFF. File .tfw, .prj, dan .tif.aux.xml dalam ZIP akan dibaca otomatis.")
+                    Button("Baca CRS otomatis") {
+                        importWithManualCRS = false
+                        openImporterAfterDismiss = true
+                        showImportOptions = false
+                    }
+                    Button("Pilih file lalu tetapkan CRS") {
+                        importWithManualCRS = true
+                        openImporterAfterDismiss = true
+                        showImportOptions = false
+                    }
+                }
+                Section("Referensi elevasi") {
+                    Toggle("Berasal dari DEMNAS · meter, EGM2008", isOn: $session.confirmedDEMNASImport)
+                        .onChange(of: session.confirmedDEMNASImport) { _, enabled in
+                            if enabled { session.verticalMetresWithUnknownDatumImport = false }
+                        }
+                    Toggle("Elevasi meter · datum tidak diketahui", isOn: $session.verticalMetresWithUnknownDatumImport)
+                        .onChange(of: session.verticalMetresWithUnknownDatumImport) { _, enabled in
+                            if enabled { session.confirmedDEMNASImport = false }
+                        }
+                    Text("Pilih sesuai informasi sumber file bila metadata vertikal tidak tersimpan. Penetapan CRS hanya membaca koordinat file, bukan memproyeksikan ulang piksel.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Impor DEM")
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Tutup") { showImportOptions = false } } }
+        }
+    }
+
+    private var crsSelection: some View {
+        NavigationStack {
+            Form {
+                Section("CRS file sumber") {
+                    Text("Jika CRS sudah tertulis di file, biarkan pilihan otomatis. Pilih EPSG manual hanya sesuai metadata sumber DEM.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                    Picker("EPSG", selection: $selectedEPSG) {
+                        Text("Baca CRS dari file").tag(0)
+                        Text("WGS 84 · 4326").tag(4326)
+                        Text("Web Mercator · 3857").tag(3857)
+                        ForEach(46...54, id: \.self) { zone in
+                            Text("UTM \(zone)S · \(32700 + zone)").tag(32700 + zone)
+                        }
+                        ForEach(46...52, id: \.self) { zone in
+                            Text("UTM \(zone)N · \(32600 + zone)").tag(32600 + zone)
+                        }
+                    }
+                    TextField("EPSG lain (opsional)", text: $customEPSG).keyboardType(.numberPad)
+                }
+            }
+            .navigationTitle("Tetapkan CRS")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Batal") { pendingElevationURLs = []; showCRSSelection = false }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Impor") {
+                        let code: Int
+                        if customEPSG.trimmingCharacters(in: .whitespaces).isEmpty { code = selectedEPSG }
+                        else if let custom = Int(customEPSG.trimmingCharacters(in: .whitespaces)) { code = custom }
+                        else { session.errorMessage = "Kode EPSG harus berupa angka."; return }
+                        guard code == 0 || (try? CoordinateTransformer(epsg: code)) != nil else {
+                            session.errorMessage = "EPSG:\(code) belum didukung. Gunakan WGS 84, Web Mercator, atau WGS 84 UTM."
+                            return
+                        }
+                        let urls = pendingElevationURLs
+                        pendingElevationURLs = []
+                        showCRSSelection = false
+                        session.loadElevationFiles(urls, manualEPSG: code == 0 ? nil : code)
+                    }
+                }
+            }
+        }
     }
     private var investigationControls: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -134,7 +301,7 @@ struct TerrainMapView: View {
                 Text("\(session.status.completed)/\(session.status.target) CPT").font(.caption.monospacedDigit())
                 Button("Area baru", systemImage: "arrow.counterclockwise") { resetConfirmation = true }.font(.caption)
             }
-            Text(session.placingCPT ? "Ketuk lokasi CPT di dalam area. Jarak antartitik minimal 2 m." : session.status.title).font(.subheadline)
+            Text(session.placingCPT ? "Ketuk lokasi CPT di dalam area. Jarak antartitik minimal 2 m." : session.recommendationSource == .explorationHeuristic ? "Titik eksplorasi untuk memperluas cakupan CPT" : session.recommendation != nil ? "CPT berikutnya disarankan · simulasi" : session.status.title).font(.subheadline)
             HStack {
                 Button(session.placingCPT ? "Batal" : "Tambah CPT", systemImage: "mappin.and.ellipse") { session.placingCPT.toggle() }
                     .buttonStyle(.bordered)
@@ -144,9 +311,34 @@ struct TerrainMapView: View {
                 Button("3D", systemImage: "cube") { session.placingCPT = false; showViewer = true }.buttonStyle(.borderedProminent)
             }.font(.subheadline)
             if session.dqnStatus == .recommending { ProgressView("DQN: menghitung lokasi CPT berikutnya…").font(.caption2) }
-            if session.recommendation != nil {
-                Text(session.recommendationSource == .dqn ? "Target merah muda: rekomendasi DQN satu grid." : session.recommendationSource == .dqnWindowedExperimental ? "Target merah muda: DQN Windowed Experimental; belum divalidasi terhadap ground truth." : "Target merah muda: fallback Heuristic geometris.")
+            if let detail = session.v42Detail {
+                Text(detail).font(.caption2)
+                    .foregroundStyle(session.dqnRecommendationSource == .dqnV45 ? .green : .orange)
+            }
+            if let q = session.v42QValue {
+                Text(String(format: "Q-value DQN V4.5: %.6f (skor model, bukan confidence)", Double(q)))
+                    .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+            }
+            if session.dqnRecommendation != nil && session.explorationRecommendation != nil {
+                HStack {
+                    Button(session.dqnRecommendationSource == .dqnV45 ? "DQN V4.5" : "DQN V3 lokal") { session.chooseRecommendation(session.dqnRecommendationSource) }
+                        .buttonStyle(.borderedProminent)
+                        .tint(session.recommendationSource == .dqnWindowedExperimental || session.recommendationSource == .dqn || session.recommendationSource == .dqnV45 ? .pink : .gray)
+                    Button("Perluas cakupan") { session.chooseRecommendation(.explorationHeuristic) }
+                        .buttonStyle(.borderedProminent)
+                        .tint(session.recommendationSource == .explorationHeuristic ? .orange : .gray)
+                }.font(.caption)
+                Text("DQN memilih titik dalam grid yang kompatibel; eksplorasi Heuristic memilih area yang belum tercakup. Keduanya tidak dibandingkan berdasarkan Q-value.")
                     .font(.caption2).foregroundStyle(.secondary)
+            }
+            if session.recommendation != nil {
+                Text(session.recommendationSource == .dqnV45 ? "Target merah muda: DQN V4.5 pada grid Flexible aktif; kualitas rekomendasi area ini belum divalidasi." : session.recommendationSource == .dqn ? "Target merah muda: rekomendasi DQN V3 satu grid." : session.recommendationSource == .dqnWindowedExperimental ? "Target merah muda: DQN V3 Windowed Experimental; belum divalidasi terhadap ground truth." : session.recommendationSource == .explorationHeuristic ? "Target merah muda: eksplorasi cakupan secara geometris, bukan hasil DQN. Pilih lokasi yang aman dan dapat diakses." : "Target merah muda: fallback Heuristic geometris.")
+                    .font(.caption2).foregroundStyle(.secondary)
+                if let candidate = session.recommendation,
+                   let nearest = session.points.map({ CoordinateTransformer.localMeters(candidate, origin: $0.coordinate).length }).min() {
+                    Text(String(format: "Jarak target dari CPT terdekat: %.1f m", nearest))
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
             }
             if session.recommendationSource == .dqn || session.recommendationSource == .dqnWindowedExperimental {
                 if let metric = ModelEvaluationMetrics.summary(
@@ -158,8 +350,11 @@ struct TerrainMapView: View {
                 Text("Titik DQN belum menilai jalan, vegetasi, akses, atau izin lokasi; periksa di lapangan.")
                     .font(.caption2).foregroundStyle(.secondary)
             }
-            if let info = session.dqnInfo { Text(info).font(.caption2).foregroundStyle(.secondary) }
-            if let reason = session.dqnError { Text("DQN belum tersedia: \(reason)").font(.caption2).foregroundStyle(.orange) }
+            if let info = session.dqnInfo,
+               session.recommendationSource == .dqn || session.recommendationSource == .dqnWindowedExperimental || session.recommendationSource == .dqnV45 {
+                Text(info).font(.caption2).foregroundStyle(.secondary)
+            }
+            if let reason = session.dqnError { Text("DQN lokal tidak menghasilkan titik: \(reason)").font(.caption2).foregroundStyle(.orange) }
         }
     }
     private func frame(_ points: [GeoPoint]) {

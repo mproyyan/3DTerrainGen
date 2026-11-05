@@ -47,6 +47,42 @@ struct AdaptiveWindow: Sendable, Equatable {
 }
 
 enum AdaptiveGrid {
+    /// Only the explicit cross-section mode removes part of the volume. Risk
+    /// coloring must not make a legal DQN cell disappear from the visible mesh.
+    static func usesCutaway(displayMode: Int) -> Bool { displayMode == 2 }
+
+    static func renderBlock(volume: ReconstructionVolume, x: Int, y: Int, z: Int,
+                            step: Int) -> RenderVoxelBlock {
+        let grid = volume.grid
+        let countX = min(step,grid.nx-x), countY = min(step,grid.ny-y), countZ = min(step,grid.nz-z)
+        return renderBlock(volume:volume,x:x,y:y,z:z,countX:countX,countY:countY,countZ:countZ)
+    }
+
+    /// Keep partial blocks on the polygon edge at native XY cell size. A
+    /// coarse box spanning invalid cells would visually extend the polygon.
+    static func renderBlocks(volume: ReconstructionVolume, x: Int, y: Int, z: Int,
+                             step: Int) -> [RenderVoxelBlock] {
+        let full = renderBlock(volume:volume,x:x,y:y,z:z,step:step)
+        var valid = [(Int,Int)]()
+        for yy in y..<(y+full.countY) { for xx in x..<(x+full.countX) {
+            if volume.isValid(x:xx,y:yy) { valid.append((xx,yy)) }
+        } }
+        if valid.count == full.countX*full.countY { return [full] }
+        return valid.map { renderBlock(volume:volume,x:$0.0,y:$0.1,z:z,
+                                       countX:1,countY:1,countZ:full.countZ) }
+    }
+
+    private static func renderBlock(volume: ReconstructionVolume, x: Int, y: Int, z: Int,
+                                    countX: Int, countY: Int, countZ: Int) -> RenderVoxelBlock {
+        let grid = volume.grid
+        return RenderVoxelBlock(x:x,y:y,z:z,countX:countX,countY:countY,countZ:countZ,
+            centerEast:volume.east(x:x)+Double(countX-1)*grid.spacingMeters/2,
+            centerNorth:volume.north(y:y)+Double(countY-1)*grid.northSpacingMeters/2,
+            centerDepth:volume.depth(z:z)+Double(countZ-1)*grid.depthSpacingMeters/2,
+            widthMeters:Double(countX)*grid.spacingMeters,
+            northMeters:Double(countY)*grid.northSpacingMeters,
+            depthMeters:Double(countZ)*grid.depthSpacingMeters)
+    }
     /// Choose terrain display detail from the area and the bounded raster grid.
     /// Model C and DQN keep their own trained input resolutions.
     static func automaticDisplayResolution(extent: MetricExtent, maxAxis: Int = 160) -> Double {
@@ -99,5 +135,15 @@ enum AdaptiveGrid {
         }
         let count = Int(rawCount)
         return (0..<count).map { minimum + Double($0) * step }
+    }
+}
+
+struct RenderVoxelBlock: Sendable {
+    let x: Int, y: Int, z: Int
+    let countX: Int, countY: Int, countZ: Int
+    let centerEast: Double, centerNorth: Double, centerDepth: Double
+    let widthMeters: Double, northMeters: Double, depthMeters: Double
+    func covers(east: Double, north: Double) -> Bool {
+        abs(east-centerEast) <= widthMeters/2 && abs(north-centerNorth) <= northMeters/2
     }
 }

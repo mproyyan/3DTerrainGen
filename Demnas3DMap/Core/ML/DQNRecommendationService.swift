@@ -5,8 +5,13 @@ import Foundation
 enum DQNRecommendationService {
     static func recommend(terrain: TerrainMesh, boundary: [GeoPoint], points: [CPTPoint],
                           reconstructorURL: URL? = nil, scorerURL: URL? = nil,
-                          g16ReconstructorURL: URL? = nil) async throws -> GeoPoint? {
+                          g16ReconstructorURL: URL? = nil,
+                          minimumSpacingMeters: Double = 2.001,
+                          spacingPoints: [CPTPoint]? = nil) async throws -> GeoPoint? {
         let complete = points.filter(\.isComplete)
+        guard minimumSpacingMeters.isFinite, minimumSpacingMeters >= 2 else {
+            throw MLIntegrationError.invalidInput("Jarak minimum CPT DQN harus sedikitnya 2 m.")
+        }
         guard [1, 2, 3, 5, 8].contains(complete.count) else {
             throw MLIntegrationError.invalidInput("DQN mendukung 1, 2, 3, 5, atau 8 profil CPT lengkap.")
         }
@@ -46,11 +51,13 @@ enum DQNRecommendationService {
         }
         try Task.checkCancellation()
         let volume = try prepared.volume(reconstruction: values)
+        let occupied = (spacingPoints ?? complete).map {
+            CoordinateTransformer.localMeters($0.coordinate, origin: terrain.origin)
+        }
         let candidates = try DQNFeatureAdapter.candidates(volume: volume, terrain: terrain)
             .filter { candidate in
-                complete.allSatisfy { point in
-                    let actual = CoordinateTransformer.localMeters(point.coordinate, origin: terrain.origin)
-                    return hypot(candidate.eastMeters - actual.x, candidate.northMeters - actual.y) >= 2.001
+                occupied.allSatisfy { actual in
+                    return hypot(candidate.eastMeters - actual.x, candidate.northMeters - actual.y) >= minimumSpacingMeters
                 }
             }
         guard !candidates.isEmpty else { return nil }

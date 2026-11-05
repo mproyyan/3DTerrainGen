@@ -42,8 +42,19 @@ struct CPTWorkspaceView: View {
                     }
                 }
                 Section("Langkah berikutnya") {
+                    if session.dqnRecommendation != nil && session.explorationRecommendation != nil {
+                        Picker("Jenis titik", selection: Binding(
+                            get: { session.recommendationSource == .explorationHeuristic ? 1 : 0 },
+                            set: { session.chooseRecommendation($0 == 1 ? .explorationHeuristic : session.dqnRecommendationSource) }
+                        )) {
+                            Text(session.dqnRecommendationSource == .dqnV45 ? "DQN V4.5" : "DQN V3 lokal").tag(0)
+                            Text("Perluas cakupan · Heuristic").tag(1)
+                        }
+                        Text("DQN menilai kandidat dalam satu window. Titik eksplorasi memperluas area yang teramati; bukan hasil model.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                     if let location = session.recommendation {
-                        Text(session.recommendationSource == .dqn ? "DQN: kandidat dengan Q-value tertinggi pada satu grid valid. Akses lapangan belum diperhitungkan." : session.recommendationSource == .dqnWindowedExperimental ? "DQN Windowed Experimental: kandidat Q-value tertinggi dari satu window yang dipilih sebelum inference. Belum tervalidasi terhadap ground truth." : "Heuristic: kandidat terjauh dari titik yang sudah diuji. Ini fallback, bukan rekomendasi DQN; akses lapangan belum diperhitungkan.")
+                        Text(session.recommendationSource == .dqnV45 ? "DQN V4.5: kandidat dengan Q-value tertinggi pada grid Flexible aktif; akses lapangan hanya diperhitungkan jika mask tersedia. Kesesuaian inferensi grid besar belum membuktikan akurasi lapangan." : session.recommendationSource == .dqn ? "DQN V3: kandidat dengan Q-value tertinggi pada satu grid valid. Akses lapangan belum diperhitungkan." : session.recommendationSource == .dqnWindowedExperimental ? "DQN Windowed Experimental: kandidat Q-value tertinggi dari satu window yang dipilih sebelum inference. Belum tervalidasi terhadap ground truth." : session.recommendationSource == .explorationHeuristic ? "Eksplorasi Heuristic: titik di bagian area yang belum teramati. Ini pemilihan geometris, bukan inference DQN; akses lapangan belum diperhitungkan." : "Heuristic: kandidat terjauh dari titik yang sudah diuji. Ini fallback, bukan rekomendasi DQN; akses lapangan belum diperhitungkan.")
                         Text(String(format: "%.6f, %.6f", location.latitude, location.longitude)).font(.caption.monospaced())
                         Button("Tetapkan titik rekomendasi", systemImage: "mappin.and.ellipse") {
                             do { try session.addCPT(at: location) }
@@ -60,11 +71,16 @@ struct CPTWorkspaceView: View {
                     Button("Kembali ke peta") { dismiss() }
                 }
                 Section("Model PoC") {
-                    Text("Model C: \(session.reconstructionStatus.rawValue)")
+                    Text("Rekonstruksi 3D: \(session.reconstructionStatus.rawValue)")
                     if let error = session.reconstructionError { Text(error).foregroundStyle(.orange) }
-                    Text("DQN: \(session.dqnStatus.rawValue). Rekonstruktor SchemaGAN V3 yang cocok dengan training DQN dijalankan terpisah dari Model C.")
+                    Text("DQN: \(session.dqnStatus.rawValue). DQN V4.5 menggunakan SchemaGAN V4.2 Flexible; batas grid model 96 × 96 × 32 sel. Lihat alasan spesifik jika pipeline V3 dipakai.")
+                    if let detail = session.v42Detail { Text(detail).foregroundStyle(session.dqnRecommendationSource == .dqnV45 ? .green : .orange) }
+                    if let q = session.v42QValue {
+                        Text(String(format: "Q-value kandidat DQN V4.5: %.6f (bukan persentase confidence)", Double(q)))
+                            .monospacedDigit()
+                    }
                     if let reason = session.dqnError { Text("Alasan fallback DQN: \(reason)").foregroundStyle(.orange) }
-                    Text(session.reconstruction == nil ? "Fallback: warna lapisan mengikuti profil CPT terdekat; area abu-abu belum didukung radius simulasi." : "Volume Ic Model C eksperimental terlihat pada tampilan 3D. Kolom fallback disembunyikan saat volume tersedia.")
+                    Text(session.reconstruction == nil ? "Fallback: warna lapisan mengikuti profil CPT terdekat; area abu-abu belum didukung radius simulasi." : session.dqnRecommendationSource == .dqnV45 ? "Volume Ic SchemaGAN V4.2 terlihat pada 3D; nilai CPT terukur dipertahankan." : "Volume Ic Model C eksperimental terlihat pada tampilan 3D. Kolom fallback disembunyikan saat volume tersedia.")
                     Text("Kekuatan, batas lapisan, dan cakupan belum tervalidasi untuk desain. Sumber rekomendasi: \(session.recommendationSource.rawValue).")
                     if let date = session.savedAt { Text("Tersimpan lokal: \(date.formatted(date: .abbreviated, time: .shortened))").font(.caption) }
                 }.font(.footnote)

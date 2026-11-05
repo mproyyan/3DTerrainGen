@@ -16,9 +16,11 @@ For memory control, the renderer keeps only reconstructed CPT-bearing windows, g
 
 ## DQN
 
-The frozen DQN scorer and matching SchemaGAN reconstructor retain their original g24 (24 × 24 × 12 at 1 × 1 × 1 m) and g16 (16 × 16 × 16 at 2 × 2 × 1 m) contracts. On larger projects, overlapping 32 × 32 m candidate windows are clipped to the polygon. A deterministic rule selects **one** eligible window containing the most recently updated complete CPT, preferring more complete CPTs and then row/column. Only that window is scored. Q-values from distinct windows are never compared.
+The frozen DQN scorer and matching SchemaGAN reconstructor retain their original g24 (24 × 24 × 12 at 1 × 1 × 1 m) and g16 (16 × 16 × 16 at 2 × 2 × 1 m) contracts. On larger projects, overlapping 32 × 32 m candidate windows are clipped to the polygon. Eligible windows contain a supported CPT count and enough measured depth for their grid. A deterministic, 4 m sample grid ranks those windows by physical polygon area farther from all existing CPTs, capping each sample's distance contribution at 16 m. Only the selected window is scored by DQN. This coverage rule is a heuristic and has not been validated as a site-wide information gain criterion. Q-values from distinct windows are never compared.
 
-A successful large-area suggestion is labelled **DQN Windowed Experimental**, with a notice that the window choice and recommendation have not been validated against ground truth. It is not a whole-site optimum. A window lacking a supported CPT count, depth, valid terrain cells, or model output falls back to Heuristic with the reason. Model C Flexible is never substituted for the DQN reconstructor.
+A successful large-area suggestion is labelled **DQN Windowed Experimental**, with a notice that the window choice and recommendation have not been validated against ground truth. It is not a whole-site optimum. If no window has a supported CPT count and depth, or the selected window lacks valid terrain cells or model output, the app falls back to Heuristic with the reason. Model C Flexible is never substituted for the DQN reconstructor.
+
+Inside the selected window, experimental site planning filters candidate coordinates against **all** completed project CPTs using a minimum separation of one quarter of the clipped window's smaller physical dimension (at least the app's 2 m placement minimum). The Q-value argmax is taken only over the remaining legal candidates. This action mask changes the evaluated policy and has no independent field validation; if no candidate survives, the app reports the spacing reason and falls back to Heuristic. The map shows the actual nearest-CPT distance in metres.
 
 ## Offline quality figures
 

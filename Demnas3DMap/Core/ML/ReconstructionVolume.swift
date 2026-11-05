@@ -6,7 +6,16 @@ struct ReconstructionGrid: Sendable {
     let ny: Int
     let nz: Int
     let spacingMeters: Double
-    let depthSpacingMeters: Double = 1
+    let northSpacingMeters: Double
+    let depthSpacingMeters: Double
+
+    init(nx: Int, ny: Int, nz: Int, spacingMeters: Double,
+         northSpacingMeters: Double? = nil, depthSpacingMeters: Double = 1) {
+        self.nx = nx; self.ny = ny; self.nz = nz
+        self.spacingMeters = spacingMeters
+        self.northSpacingMeters = northSpacingMeters ?? spacingMeters
+        self.depthSpacingMeters = depthSpacingMeters
+    }
 
     static let fixed = ReconstructionGrid(nx: 24, ny: 24, nz: 12, spacingMeters: 1)
     var voxelCount: Int { nx * ny * nz }
@@ -80,7 +89,7 @@ struct ReconstructionVolume: Sendable {
     static func xyIndex(x: Int, y: Int) -> Int { y * side + x }
     func index(x: Int, y: Int, z: Int) -> Int { grid.index(x: x, y: y, z: z) }
     func east(x: Int) -> Double { westMeters + (Double(x) + 0.5) * grid.spacingMeters }
-    func north(y: Int) -> Double { southMeters + (Double(y) + 0.5) * grid.spacingMeters }
+    func north(y: Int) -> Double { southMeters + (Double(y) + 0.5) * grid.northSpacingMeters }
     func depth(z: Int) -> Double { (Double(z) + 0.5) * grid.depthSpacingMeters }
     func isValid(x: Int, y: Int) -> Bool { validXY[grid.xyIndex(x: x, y: y)] }
     func ic(x: Int, y: Int, z: Int) -> Float { values[index(x: x, y: y, z: z)] }

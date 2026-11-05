@@ -66,6 +66,19 @@ private func mlPoint(_ name: String, longitude: Double, latitude: Double, qc: Do
     return point
 }
 
+@Test func explorationHeuristicOnlyTargetsAreaOutsideDQNWindowCoverage() throws {
+    let (small, _) = mlFixture()
+    let near = try mlPoint("CPT-1", longitude: 110.00003, latitude: -6.99997)
+    #expect(AreaExplorationPlanner.recommend(terrain: small, points: [near]) == nil)
+
+    let (large, _) = mlFixture(span: 0.001)
+    let candidate = try #require(AreaExplorationPlanner.recommend(terrain: large, points: [near]))
+    #expect(candidate.nearestWindowAxisDistanceMeters > 32)
+    #expect(large.surfacePosition(at: candidate.coordinate) != nil)
+    let pending = CPTPoint(id: UUID(), name: "CPT-2", coordinate: candidate.coordinate, surfaceElevation: 100)
+    #expect(AreaExplorationPlanner.recommend(terrain: large, points: [near, pending]) == nil)
+}
+
 @Test func modelCAdapterOneAndTwoCPTsPreserveTrainingTensorContract() throws {
     let (terrain, boundary) = mlFixture()
     let first = try mlPoint("CPT-1", longitude: 110.00006, latitude: -6.99994)
@@ -434,14 +447,63 @@ private func peakResidentBytes() -> Int {
     #expect(result.explanation.contains("Experimental"))
     let extent = try MetricExtent(boundary: boundary, origin: terrain.origin)
     let windows = try AdaptiveGrid.windows(extent: extent, width: 32, height: 32, overlap: 8)
-    let selected = try #require(windows.first { $0.contains(point.coordinate, origin: terrain.origin) })
+    let eligible = windows.compactMap { window -> (AdaptiveWindow, [GeoPoint], [CPTPoint])? in
+        guard window.contains(point.coordinate, origin: terrain.origin) else { return nil }
+        let clipped = window.clippedBoundary(boundary, origin: terrain.origin)
+        return clipped.count >= 3 ? (window, clipped, [point]) : nil
+    }
+    let selected = try #require(AdaptiveDQNRecommendationService.selectWindow(
+        eligible, allPoints: [point], origin: terrain.origin
+    )?.0)
+    let clipped = selected.clippedBoundary(boundary, origin: terrain.origin)
+    let selectedExtent = try MetricExtent(boundary: clipped, origin: terrain.origin)
+    let minimumSpacing = max(2.001, min(selectedExtent.width, selectedExtent.height) / 4)
     let direct = try #require(try await DQNRecommendationService.recommend(
-        terrain: terrain, boundary: selected.clippedBoundary(boundary, origin: terrain.origin),
-        points: [point], scorerURL: scorerURL, g16ReconstructorURL: g16URL
+        terrain: terrain, boundary: clipped, points: [point],
+        scorerURL: scorerURL, g16ReconstructorURL: g16URL,
+        minimumSpacingMeters: minimumSpacing
     ))
     let a = CoordinateTransformer.localMeters(result.coordinate, origin: terrain.origin)
     let b = CoordinateTransformer.localMeters(direct, origin: terrain.origin)
     #expect(hypot(a.x - b.x, a.y - b.y) < 0.05)
+    let observed = CoordinateTransformer.localMeters(point.coordinate, origin: terrain.origin)
+    #expect(hypot(a.x - observed.x, a.y - observed.y) >= minimumSpacing - 0.05)
+
+    let prepared = try DQNInputG16Adapter.prepare(terrain: terrain, boundary: clipped, points: [point])
+    let reconstruction = try await DQNReconstructorG16Service(modelURL: g16URL).reconstruct(
+        sparse: prepared.sparse, mask: prepared.mask, idw: prepared.idw,
+        observedIc: prepared.observedIc
+    )
+    let volume = try prepared.volume(reconstruction: reconstruction)
+    let legal = try DQNFeatureAdapter.candidates(volume: volume, terrain: terrain)
+        .filter { hypot($0.eastMeters - observed.x, $0.northMeters - observed.y) >= minimumSpacing }
+    let scores = try await DQNScorerService(modelURL: scorerURL).score(candidateFeatures: legal.map(\.features))
+    let best = try #require(scores.indices.first { scores[$0] == scores.max()! })
+    #expect(hypot(a.x - legal[best].eastMeters, a.y - legal[best].northMeters) < 0.05)
+
+    let noLegalSite = try await DQNRecommendationService.recommend(
+        terrain: terrain, boundary: clipped, points: [point],
+        scorerURL: scorerURL, g16ReconstructorURL: g16URL,
+        minimumSpacingMeters: 100
+    )
+    #expect(noLegalSite == nil)
+}
+
+@Test func windowSelectionPrefersUnobservedCoverageBeyondLatestCPT() throws {
+    let (terrain, boundary, _) = metricMLFixture(width: 80, height: 32)
+    let coordinate = CoordinateTransformer.geographic(east: 26, north: 16, origin: terrain.origin)
+    let point = try mlPoint("CPT-1", longitude: coordinate.longitude, latitude: coordinate.latitude, maxDepth: 16)
+    let extent = try MetricExtent(boundary: boundary, origin: terrain.origin)
+    let windows = try AdaptiveGrid.windows(extent: extent, width: 32, height: 32, overlap: 8)
+    let eligible = windows.compactMap { window -> (AdaptiveWindow, [GeoPoint], [CPTPoint])? in
+        guard window.contains(point.coordinate, origin: terrain.origin) else { return nil }
+        return (window, window.clippedBoundary(boundary, origin: terrain.origin), [point])
+    }
+    #expect(eligible.count == 2)
+    let selected = try #require(AdaptiveDQNRecommendationService.selectWindow(
+        eligible, allPoints: [point], origin: terrain.origin
+    ))
+    #expect(selected.0.column == 1)
 }
 
 

@@ -72,8 +72,9 @@ struct TiledIcSampler: Sendable {
         var weighted = 0.0, weightSum = 0.0
         for volume in volumes where depthIndex < volume.grid.nz {
             let spacing = volume.grid.spacingMeters
+            let northSpacing = volume.grid.northSpacingMeters
             let x = Int(floor((east - volume.westMeters) / spacing))
-            let y = Int(floor((north - volume.southMeters) / spacing))
+            let y = Int(floor((north - volume.southMeters) / northSpacing))
             guard (0..<volume.grid.nx).contains(x), (0..<volume.grid.ny).contains(y),
                   volume.isValid(x: x, y: y) else { continue }
             let index = volume.index(x: x, y: y, z: depthIndex)
@@ -81,8 +82,8 @@ struct TiledIcSampler: Sendable {
             let edge = min(east - volume.westMeters,
                            volume.westMeters + Double(volume.grid.nx) * spacing - east,
                            north - volume.southMeters,
-                           volume.southMeters + Double(volume.grid.ny) * spacing - north)
-            let weight = max(0.01, min(1, edge / max(overlapMeters, spacing)))
+                           volume.southMeters + Double(volume.grid.ny) * northSpacing - north)
+            let weight = max(0.01, min(1, edge / max(overlapMeters, max(spacing,northSpacing))))
             weighted += Double(volume.values[index]) * weight
             weightSum += weight
         }

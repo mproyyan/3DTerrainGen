@@ -162,7 +162,8 @@ enum DEMMetadataValidator {
         }
     }
     static func validate(_ reader: TIFFReader, companion: CompanionMetadata,
-                         confirmedDEMNAS: Bool, manualEPSG: Int? = nil) throws -> DEMMetadata {
+                         confirmedDEMNAS: Bool, manualEPSG: Int? = nil,
+                         verticalMetresWithUnknownDatum: Bool = false) throws -> DEMMetadata {
         var keys: [Int:Int] = [:]
         if reader.tags[34735] != nil {
             let v = try reader.integers(34735)
@@ -266,8 +267,13 @@ enum DEMMetadataValidator {
             guard v == 3855 || keys[4099] == 9001 else { throw TerrainError("The vertical CRS needs explicit metre units.") }
             vertical = v == 3855 ? "EGM2008 orthometric height (EPSG:3855)" : "Vertical CRS EPSG:\(v); heights retained without datum conversion"
         } else {
-            guard confirmedDEMNAS else { throw TerrainError("Vertical reference/units are absent. Confirm that this is an original official DEMNAS file (metres, EGM2008), or provide a GeoTIFF with explicit metre vertical units and reference.") }
-            vertical = "EGM2008 orthometric height; official DEMNAS provenance confirmed by user"
+            if confirmedDEMNAS {
+                vertical = "EGM2008 orthometric height; DEMNAS provenance confirmed by user"
+            } else if verticalMetresWithUnknownDatum {
+                vertical = "Metre heights declared by user; vertical datum unspecified"
+            } else {
+                throw TerrainError("Satuan/datum elevasi tidak tersimpan dalam GeoTIFF. Di menu Impor DEM, pilih referensi vertikal sesuai informasi sumber file; jangan menebak satuannya.")
+            }
         }
         provenance.append(contentsOf: companion.sources)
         return .init(width:reader.width, height:reader.height, transform:transform, epsg:epsg, noData:noData, verticalReference:vertical, provenance:provenance, footprint:footprint)

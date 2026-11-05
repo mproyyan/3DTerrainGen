@@ -1,0 +1,188 @@
+{
+  "cases" : [
+    {
+      "common_hidden_cpt_count" : 4,
+      "common_hidden_ic_rmse_model_c_flexible" : 0.40383043041896621,
+      "initial_cpt" : "IMC084",
+      "observed_cpt_count" : 2,
+      "policy" : "dqn"
+    },
+    {
+      "common_hidden_cpt_count" : 4,
+      "common_hidden_ic_rmse_model_c_flexible" : 0.40383043041896621,
+      "initial_cpt" : "IMC084",
+      "observed_cpt_count" : 2,
+      "policy" : "uniform"
+    },
+    {
+      "common_hidden_cpt_count" : 2,
+      "common_hidden_ic_rmse_model_c_flexible" : 0.37465723169133203,
+      "initial_cpt" : "IMC084",
+      "observed_cpt_count" : 3,
+      "policy" : "dqn"
+    },
+    {
+      "common_hidden_cpt_count" : 2,
+      "common_hidden_ic_rmse_model_c_flexible" : 0.4986469357465953,
+      "initial_cpt" : "IMC084",
+      "observed_cpt_count" : 3,
+      "policy" : "uniform"
+    },
+    {
+      "common_hidden_cpt_count" : 3,
+      "common_hidden_ic_rmse_model_c_flexible" : 0.53015087256742199,
+      "initial_cpt" : "IMC085",
+      "observed_cpt_count" : 2,
+      "policy" : "dqn"
+    },
+    {
+      "common_hidden_cpt_count" : 3,
+      "common_hidden_ic_rmse_model_c_flexible" : 0.51573715439915213,
+      "initial_cpt" : "IMC085",
+      "observed_cpt_count" : 2,
+      "policy" : "uniform"
+    },
+    {
+      "common_hidden_cpt_count" : 3,
+      "common_hidden_ic_rmse_model_c_flexible" : 0.51556474959493614,
+      "initial_cpt" : "IMC085",
+      "observed_cpt_count" : 3,
+      "policy" : "dqn"
+    },
+    {
+      "common_hidden_cpt_count" : 3,
+      "common_hidden_ic_rmse_model_c_flexible" : 0.51556474959493614,
+      "initial_cpt" : "IMC085",
+      "observed_cpt_count" : 3,
+      "policy" : "uniform"
+    },
+    {
+      "common_hidden_cpt_count" : 3,
+      "common_hidden_ic_rmse_model_c_flexible" : 0.43792430078099787,
+      "initial_cpt" : "IMC086",
+      "observed_cpt_count" : 2,
+      "policy" : "dqn"
+    },
+    {
+      "common_hidden_cpt_count" : 3,
+      "common_hidden_ic_rmse_model_c_flexible" : 0.42958351650878934,
+      "initial_cpt" : "IMC086",
+      "observed_cpt_count" : 2,
+      "policy" : "uniform"
+    },
+    {
+      "common_hidden_cpt_count" : 1,
+      "common_hidden_ic_rmse_model_c_flexible" : 0.14717899813758051,
+      "initial_cpt" : "IMC086",
+      "observed_cpt_count" : 3,
+      "policy" : "dqn"
+    },
+    {
+      "common_hidden_cpt_count" : 1,
+      "common_hidden_ic_rmse_model_c_flexible" : 0.17074947988743303,
+      "initial_cpt" : "IMC086",
+      "observed_cpt_count" : 3,
+      "policy" : "uniform"
+    },
+    {
+      "common_hidden_cpt_count" : 3,
+      "common_hidden_ic_rmse_model_c_flexible" : 0.33277637512113628,
+      "initial_cpt" : "IMC087",
+      "observed_cpt_count" : 2,
+      "policy" : "dqn"
+    },
+    {
+      "common_hidden_cpt_count" : 3,
+      "common_hidden_ic_rmse_model_c_flexible" : 0.43012426226007788,
+      "initial_cpt" : "IMC087",
+      "observed_cpt_count" : 2,
+      "policy" : "uniform"
+    },
+    {
+      "common_hidden_cpt_count" : 2,
+      "common_hidden_ic_rmse_model_c_flexible" : 0.38835129396644691,
+      "initial_cpt" : "IMC087",
+      "observed_cpt_count" : 3,
+      "policy" : "dqn"
+    },
+    {
+      "common_hidden_cpt_count" : 2,
+      "common_hidden_ic_rmse_model_c_flexible" : 0.49591496978790561,
+      "initial_cpt" : "IMC087",
+      "observed_cpt_count" : 3,
+      "policy" : "uniform"
+    },
+    {
+      "common_hidden_cpt_count" : 3,
+      "common_hidden_ic_rmse_model_c_flexible" : 0.32597810753898404,
+      "initial_cpt" : "IMC088",
+      "observed_cpt_count" : 2,
+      "policy" : "dqn"
+    },
+    {
+      "common_hidden_cpt_count" : 3,
+      "common_hidden_ic_rmse_model_c_flexible" : 0.23122868592152701,
+      "initial_cpt" : "IMC088",
+      "observed_cpt_count" : 2,
+      "policy" : "uniform"
+    },
+    {
+      "common_hidden_cpt_count" : 1,
+      "common_hidden_ic_rmse_model_c_flexible" : 0.24413739830978312,
+      "initial_cpt" : "IMC088",
+      "observed_cpt_count" : 3,
+      "policy" : "dqn"
+    },
+    {
+      "common_hidden_cpt_count" : 1,
+      "common_hidden_ic_rmse_model_c_flexible" : 0.17074947988743303,
+      "initial_cpt" : "IMC088",
+      "observed_cpt_count" : 3,
+      "policy" : "uniform"
+    },
+    {
+      "common_hidden_cpt_count" : 3,
+      "common_hidden_ic_rmse_model_c_flexible" : 0.46716106787938755,
+      "initial_cpt" : "IMC090",
+      "observed_cpt_count" : 2,
+      "policy" : "dqn"
+    },
+    {
+      "common_hidden_cpt_count" : 3,
+      "common_hidden_ic_rmse_model_c_flexible" : 0.363855878705372,
+      "initial_cpt" : "IMC090",
+      "observed_cpt_count" : 2,
+      "policy" : "uniform"
+    },
+    {
+      "common_hidden_cpt_count" : 1,
+      "common_hidden_ic_rmse_model_c_flexible" : 0.24413739830978312,
+      "initial_cpt" : "IMC090",
+      "observed_cpt_count" : 3,
+      "policy" : "dqn"
+    },
+    {
+      "common_hidden_cpt_count" : 1,
+      "common_hidden_ic_rmse_model_c_flexible" : 0.19018917133361468,
+      "initial_cpt" : "IMC090",
+      "observed_cpt_count" : 3,
+      "policy" : "uniform"
+    }
+  ],
+  "field_profiles_sha256" : "9be3a0892702905ba095fcdc0a069818cee10b9bd2c9d8283c2090b2735ead95",
+  "model" : "ModelC_Flexible.mlpackage used by app 3D display",
+  "model_spec_sha256" : "64de7dd5f6cb4482caea3a58b71e7ddf89f26674ef2998c4037e357929388c98",
+  "pilot_selection_sha256" : "829cd3e007f5da4618427a33b746dee872a5b94ab1cea2508811a971cbb0d426",
+  "protocol" : "model-c-flexible-on-frozen-dqn-pilot-selections-v1",
+  "summary" : {
+    "2" : {
+      "dqn" : 0.41630352571781559,
+      "uniform" : 0.39572665470231411
+    },
+    "3" : {
+      "dqn" : 0.31900451166831029,
+      "uniform" : 0.34030246437298634
+    }
+  },
+  "truth_scope" : "same six real CPT sites and common hidden profiles as Python pilot"
+}
