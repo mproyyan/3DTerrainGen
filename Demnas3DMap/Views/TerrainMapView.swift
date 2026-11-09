@@ -44,38 +44,18 @@ struct TerrainMapView: View {
                             }.buttonStyle(.plain).accessibilityLabel("\(point.name), \(point.isComplete ? "hasil tersedia" : "menunggu data")")
                         }
                     }
-                    if let candidate = session.recommendation {
+                    if session.recommendationSource == .dqnV46A, let candidate = session.recommendation {
                         Annotation("", coordinate: candidate.coordinate) {
                             VStack(spacing: 3) {
-                                Text(session.recommendationSource == .dqnV45 ? "DQN V4.5" : session.recommendationSource == .dqn ? "DQN V3" : session.recommendationSource == .dqnWindowedExperimental ? "DQN V3 · eksperimen" : session.recommendationSource == .explorationHeuristic ? "Eksplorasi · Heuristic" : "Heuristic")
-                                    .font(.caption2.bold()).padding(.horizontal, 6).padding(.vertical, 3)
+                                Text("DQN V4.6-A").font(.caption2.bold()).padding(.horizontal, 6).padding(.vertical, 3)
                                     .background(.regularMaterial, in: Capsule())
+                                if let q = session.v42QValue {
+                                    Text(String(format: "Q %.6f", Double(q))).font(.caption2.monospacedDigit().bold())
+                                        .padding(.horizontal, 6).padding(.vertical, 3).background(.regularMaterial, in: Capsule())
+                                }
                                 Image(systemName: "scope").font(.title).foregroundStyle(.pink)
                                     .padding(6).background(.regularMaterial, in: .circle)
-                            }
-                            .accessibilityLabel(session.recommendationSource == .dqnV45 ? "Rekomendasi DQN V4.5 Core ML" : session.recommendationSource == .dqnWindowedExperimental ? "Rekomendasi DQN V3 window lokal, eksperimental" : session.recommendationSource == .dqn ? "Rekomendasi DQN" : session.recommendationSource == .explorationHeuristic ? "Titik eksplorasi cakupan, Heuristic geometris" : "Rekomendasi Heuristic")
-                        }
-                    }
-                    if let exploration = session.explorationRecommendation,
-                       session.recommendationSource != .explorationHeuristic {
-                        Annotation("Eksplorasi · Heuristic", coordinate: exploration.coordinate) {
-                            Button { session.chooseRecommendation(.explorationHeuristic) } label: {
-                                Image(systemName: "scope").font(.title2).foregroundStyle(.orange)
-                                    .padding(6).background(.regularMaterial, in: .circle)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Pilih titik eksplorasi Heuristic")
-                        }
-                    }
-                    if let dqn = session.dqnRecommendation,
-                       session.recommendationSource == .explorationHeuristic {
-                        Annotation(session.dqnRecommendationSource == .dqnV45 ? "DQN V4.5" : "DQN V3 · eksperimen", coordinate: dqn.coordinate) {
-                            Button { session.chooseRecommendation(session.dqnRecommendationSource) } label: {
-                                Image(systemName: "scope").font(.title2).foregroundStyle(.pink)
-                                    .padding(6).background(.regularMaterial, in: .circle)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Pilih titik DQN yang tersedia")
+                            }.accessibilityLabel("Rekomendasi DQN V4.6-A Core ML")
                         }
                     }
                     ForEach(Array(session.selection.coordinates.enumerated()), id: \.offset) { index, coordinate in
@@ -301,7 +281,7 @@ struct TerrainMapView: View {
                 Text("\(session.status.completed)/\(session.status.target) CPT").font(.caption.monospacedDigit())
                 Button("Area baru", systemImage: "arrow.counterclockwise") { resetConfirmation = true }.font(.caption)
             }
-            Text(session.placingCPT ? "Ketuk lokasi CPT di dalam area. Jarak antartitik minimal 2 m." : session.recommendationSource == .explorationHeuristic ? "Titik eksplorasi untuk memperluas cakupan CPT" : session.recommendation != nil ? "CPT berikutnya disarankan · simulasi" : session.status.title).font(.subheadline)
+            Text(session.placingCPT ? "Ketuk lokasi CPT di dalam area. Jarak antartitik minimal 2 m." : session.recommendation != nil ? "CPT berikutnya disarankan · simulasi" : session.status.title).font(.subheadline)
             HStack {
                 Button(session.placingCPT ? "Batal" : "Tambah CPT", systemImage: "mappin.and.ellipse") { session.placingCPT.toggle() }
                     .buttonStyle(.bordered)
@@ -310,29 +290,36 @@ struct TerrainMapView: View {
                 Spacer()
                 Button("3D", systemImage: "cube") { session.placingCPT = false; showViewer = true }.buttonStyle(.borderedProminent)
             }.font(.subheadline)
+            if let assessment = session.investigationAssessment {
+                VStack(alignment:.leading,spacing:4) {
+                    Text(String(format:"Predicted Coverage: %.1f%%",assessment.predictedCoverage * 100))
+                        .font(.subheadline.monospacedDigit().bold())
+                    Text(assessment.advisoryHigh ? "Kecukupan Investigasi: Tinggi" : "Kecukupan Investigasi: Belum Memadai")
+                        .font(.subheadline.bold())
+                    Text(assessment.advisoryHigh
+                         ? "Model memperkirakan cakupan rekonstruksi telah memenuhi target eksperimen. Verifikasi engineer tetap diperlukan sebelum menghentikan investigasi."
+                         : "Investigasi tambahan direkomendasikan.")
+                        .font(.caption)
+                    if let spacing = session.minimumRecommendationSpacingMeters {
+                        Text(String(format:"Minimum Recommendation Spacing: %.1f m",spacing))
+                            .font(.caption.monospacedDigit())
+                    }
+                }.frame(maxWidth:.infinity,alignment:.leading)
+                    .padding(10).background(.thinMaterial,in:RoundedRectangle(cornerRadius:10))
+            }
             if session.dqnStatus == .recommending { ProgressView("DQN: menghitung lokasi CPT berikutnya…").font(.caption2) }
             if let detail = session.v42Detail {
                 Text(detail).font(.caption2)
-                    .foregroundStyle(session.dqnRecommendationSource == .dqnV45 ? .green : .orange)
+                    .foregroundStyle(session.dqnRecommendationSource == .dqnV46A ? .green : .orange)
             }
-            if let q = session.v42QValue {
-                Text(String(format: "Q-value DQN V4.5: %.6f (skor model, bukan confidence)", Double(q)))
-                    .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
-            }
-            if session.dqnRecommendation != nil && session.explorationRecommendation != nil {
-                HStack {
-                    Button(session.dqnRecommendationSource == .dqnV45 ? "DQN V4.5" : "DQN V3 lokal") { session.chooseRecommendation(session.dqnRecommendationSource) }
-                        .buttonStyle(.borderedProminent)
-                        .tint(session.recommendationSource == .dqnWindowedExperimental || session.recommendationSource == .dqn || session.recommendationSource == .dqnV45 ? .pink : .gray)
-                    Button("Perluas cakupan") { session.chooseRecommendation(.explorationHeuristic) }
-                        .buttonStyle(.borderedProminent)
-                        .tint(session.recommendationSource == .explorationHeuristic ? .orange : .gray)
-                }.font(.caption)
-                Text("DQN memilih titik dalam grid yang kompatibel; eksplorasi Heuristic memilih area yang belum tercakup. Keduanya tidak dibandingkan berdasarkan Q-value.")
+            if session.recommendationSource == .dqnV46A, let q = session.v42QValue {
+                Text(String(format: "Q-score rekomendasi DQN V4.6-A: %.6f", Double(q)))
+                    .font(.subheadline.monospacedDigit().bold()).foregroundStyle(.pink)
+                Text("Skor model untuk ranking lokasi, bukan confidence.")
                     .font(.caption2).foregroundStyle(.secondary)
             }
-            if session.recommendation != nil {
-                Text(session.recommendationSource == .dqnV45 ? "Target merah muda: DQN V4.5 pada grid Flexible aktif; kualitas rekomendasi area ini belum divalidasi." : session.recommendationSource == .dqn ? "Target merah muda: rekomendasi DQN V3 satu grid." : session.recommendationSource == .dqnWindowedExperimental ? "Target merah muda: DQN V3 Windowed Experimental; belum divalidasi terhadap ground truth." : session.recommendationSource == .explorationHeuristic ? "Target merah muda: eksplorasi cakupan secara geometris, bukan hasil DQN. Pilih lokasi yang aman dan dapat diakses." : "Target merah muda: fallback Heuristic geometris.")
+            if session.recommendationSource == .dqnV46A, session.recommendation != nil {
+                Text("Target merah muda: rekomendasi DQN V4.6-A. Periksa akses dan izin lokasi di lapangan.")
                     .font(.caption2).foregroundStyle(.secondary)
                 if let candidate = session.recommendation,
                    let nearest = session.points.map({ CoordinateTransformer.localMeters(candidate, origin: $0.coordinate).length }).min() {
@@ -340,21 +327,10 @@ struct TerrainMapView: View {
                         .font(.caption2).foregroundStyle(.secondary)
                 }
             }
-            if session.recommendationSource == .dqn || session.recommendationSource == .dqnWindowedExperimental {
-                if let metric = ModelEvaluationMetrics.summary(
-                    observedCPTCount: session.status.completed,
-                    windowed: session.recommendationSource == .dqnWindowedExperimental
-                ) {
-                    Text(metric).font(.caption2).foregroundStyle(.secondary)
-                }
-                Text("Titik DQN belum menilai jalan, vegetasi, akses, atau izin lokasi; periksa di lapangan.")
-                    .font(.caption2).foregroundStyle(.secondary)
-            }
-            if let info = session.dqnInfo,
-               session.recommendationSource == .dqn || session.recommendationSource == .dqnWindowedExperimental || session.recommendationSource == .dqnV45 {
+            if let info = session.dqnInfo, session.recommendationSource == .dqnV46A {
                 Text(info).font(.caption2).foregroundStyle(.secondary)
             }
-            if let reason = session.dqnError { Text("DQN lokal tidak menghasilkan titik: \(reason)").font(.caption2).foregroundStyle(.orange) }
+            if session.dqnError != nil { Text("Rekomendasi DQN belum tersedia.").font(.caption2).foregroundStyle(.orange) }
         }
     }
     private func frame(_ points: [GeoPoint]) {

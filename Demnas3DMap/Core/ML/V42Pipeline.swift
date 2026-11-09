@@ -43,6 +43,78 @@ struct V42GridPlan: Sendable {
     }
 }
 
+/// Maps a physical CPT position to the rasterized polygon. X is east and Y is north;
+/// neither the model site nor this snapping changes the original map coordinate.
+struct V42CPTGridMapping: Sendable {
+    let x: Int
+    let y: Int
+    let naturalX: Int
+    let naturalY: Int
+    let naturalGridX: Double
+    let naturalGridY: Double
+    let naturalCellValid: Bool
+    let center: Point2
+    let distanceMeters: Double
+}
+
+enum V42CPTGridMapper {
+    static func map(_ local: Point2, name: String, polygon: [Point2],
+                    west: Double, south: Double, nx: Int, ny: Int,
+                    dx: Double, dy: Double, validXY: [Bool]) throws -> V42CPTGridMapping {
+        guard local.x.isFinite, local.y.isFinite, dx > 0, dy > 0,
+              nx > 0, ny > 0, validXY.count == nx * ny else {
+            throw MLIntegrationError.invalidInput("\(name): parameter pemetaan grid V4.2 tidak valid.")
+        }
+        let rawX = (local.x - west) / dx
+        let rawY = (local.y - south) / dy
+        guard rawX.isFinite, rawY.isFinite,
+              rawX > Double(Int.min) + 1, rawX < Double(Int.max) - 1,
+              rawY > Double(Int.min) + 1, rawY < Double(Int.max) - 1 else {
+            throw MLIntegrationError.invalidInput("\(name): koordinat grid V4.2 tidak valid.")
+        }
+        let naturalX = Int(floor(rawX)), naturalY = Int(floor(rawY))
+        func center(_ x: Int, _ y: Int) -> Point2 {
+            .init(x: west + (Double(x) + 0.5) * dx,
+                  y: south + (Double(y) + 0.5) * dy)
+        }
+        func inBounds(_ x: Int, _ y: Int) -> Bool { (0..<nx).contains(x) && (0..<ny).contains(y) }
+        let naturalValid = inBounds(naturalX, naturalY) && validXY[naturalY * nx + naturalX]
+        let naturalCenter = inBounds(naturalX, naturalY) ? center(naturalX, naturalY) : nil
+        #if DEBUG
+        let naturalDistance = naturalCenter.map { hypot(local.x - $0.x, local.y - $0.y) }
+        print("[CPT Grid Mapping] \(name): local east=\(local.x) m north=\(local.y) m; grid before floor=(\(rawX),\(rawY)); natural cell=(\(naturalX),\(naturalY)); grid=\(nx)×\(ny); dx=\(dx) m dy=\(dy) m; in bounds=\(inBounds(naturalX,naturalY)); validMask[x,y,:].any()=\(naturalValid); natural center=\(String(describing: naturalCenter)); distance=\(String(describing: naturalDistance)) m")
+        #endif
+        guard Geometry.contains(local, in: polygon) else {
+            throw MLIntegrationError.invalidInput("\(name): posisi CPT berada di luar poligon investigasi.")
+        }
+        if naturalValid, let naturalCenter {
+            return .init(x: naturalX, y: naturalY, naturalX: naturalX, naturalY: naturalY,
+                         naturalGridX: rawX, naturalGridY: rawY, naturalCellValid: true,
+                         center: naturalCenter,
+                         distanceMeters: hypot(local.x - naturalCenter.x, local.y - naturalCenter.y))
+        }
+        let tolerance = hypot(dx, dy)
+        var best: (x: Int, y: Int, center: Point2, distance: Double)?
+        for y in 0..<ny { for x in 0..<nx where validXY[y * nx + x] {
+            let candidate = center(x, y)
+            let distance = hypot(local.x - candidate.x, local.y - candidate.y)
+            if distance <= tolerance + 1e-9 && (best == nil || distance < best!.distance) {
+                best = (x, y, candidate, distance)
+            }
+        } }
+        guard let best else {
+            throw MLIntegrationError.invalidInput(String(format:
+                "%@: tidak ada sel model valid dalam %.2f m dari posisi CPT.", name, tolerance))
+        }
+        #if DEBUG
+        print("[CPT Grid Mapping] \(name) snapped from (\(local.x),\(local.y)) to grid (\(best.x),\(best.y)) center=(\(best.center.x),\(best.center.y)) distance = \(best.distance) m")
+        #endif
+        return .init(x: best.x, y: best.y, naturalX: naturalX, naturalY: naturalY,
+                     naturalGridX: rawX, naturalGridY: rawY, naturalCellValid: false,
+                     center: best.center, distanceMeters: best.distance)
+    }
+}
+
 struct V42Input: Sendable {
     static let mean: Float = 2.7903323310879604
     static let std: Float = 0.7723778445702414
@@ -97,11 +169,13 @@ struct V42Input: Sendable {
         var sites = [(x:Int,y:Int)]()
         for point in complete {
             let local = CoordinateTransformer.localMeters(point.coordinate, origin:terrain.origin)
-            let x = Int(floor((local.x - west) / spacing))
-            let y = Int(floor((local.y - south) / northSpacing))
-            guard (0..<nx).contains(x), (0..<ny).contains(y), validXY[xy(x,y)] else {
-                throw MLIntegrationError.invalidInput("\(point.name): posisi CPT tidak jatuh pada sel valid grid V4.2; ubah area atau resolusi.")
-            }
+            #if DEBUG
+            print("[CPT Grid Mapping] \(point.name): original latitude=\(point.coordinate.latitude), longitude=\(point.coordinate.longitude)")
+            #endif
+            let mapping = try V42CPTGridMapper.map(local, name: point.name, polygon: polygon,
+                                                   west: west, south: south, nx: nx, ny: ny,
+                                                   dx: spacing, dy: northSpacing, validXY: validXY)
+            let x = mapping.x, y = mapping.y
             guard !sites.contains(where: { $0.x == x && $0.y == y }) else {
                 throw MLIntegrationError.invalidInput(String(format: "Dua CPT berada pada sel %.2f × %.2f m yang sama; V4.2 tidak dapat mewakilinya sebagai situs terpisah.", spacing, northSpacing))
             }

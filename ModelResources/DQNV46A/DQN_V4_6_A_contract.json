@@ -1,0 +1,115 @@
+{
+  "name": "DQN V4.6-A",
+  "purpose": "Rank legal candidate XY locations for the next CPT.",
+  "stoppingCriterion": false,
+  "checkpointSchemaVersion": "dqn-v4.6a-config-1",
+  "legacyCheckpointVersionField": "dqn-v4.2",
+  "network": {
+    "inputFeatureCount": 29,
+    "hiddenWidth": 64,
+    "architecture": [
+      "Linear(29,64)",
+      "ReLU",
+      "Linear(64,64)",
+      "ReLU",
+      "Linear(64,1)"
+    ],
+    "output": "Q-value per legal candidate"
+  },
+  "input": {
+    "name": "features",
+    "shape": "[N,29]",
+    "combinedOrder": [
+      "x_local_fraction",
+      "y_local_fraction",
+      "nearest_cpt_distance_fraction",
+      "local_observed_density_4m",
+      "valid_depth_fraction",
+      "reconstructed_ic_mean_z",
+      "reconstructed_ic_std_z",
+      "depth_bin_0_ic_mean_z",
+      "depth_bin_1_ic_mean_z",
+      "depth_bin_2_ic_mean_z",
+      "depth_bin_3_ic_mean_z",
+      "depth_bin_0_empty",
+      "depth_bin_1_empty",
+      "depth_bin_2_empty",
+      "depth_bin_3_empty",
+      "local_4m_reconstructed_ic_mean_z",
+      "local_4m_valid_fraction",
+      "lateral_ic_gradient",
+      "log_observed_cpt_fraction",
+      "extent_x_over_32m",
+      "extent_y_over_32m",
+      "extent_z_over_16m",
+      "dx_over_2m",
+      "dy_over_2m",
+      "dz_over_2m",
+      "global_reconstructed_ic_mean_z",
+      "global_reconstructed_ic_std_z",
+      "valid_voxel_fraction",
+      "observed_valid_voxel_fraction"
+    ],
+    "candidateFeatureCount": 18,
+    "globalContextCount": 11,
+    "candidateFeatureNames": [
+      "x_local_fraction",
+      "y_local_fraction",
+      "nearest_cpt_distance_fraction",
+      "local_observed_density_4m",
+      "valid_depth_fraction",
+      "reconstructed_ic_mean_z",
+      "reconstructed_ic_std_z",
+      "depth_bin_0_ic_mean_z",
+      "depth_bin_1_ic_mean_z",
+      "depth_bin_2_ic_mean_z",
+      "depth_bin_3_ic_mean_z",
+      "depth_bin_0_empty",
+      "depth_bin_1_empty",
+      "depth_bin_2_empty",
+      "depth_bin_3_empty",
+      "local_4m_reconstructed_ic_mean_z",
+      "local_4m_valid_fraction",
+      "lateral_ic_gradient"
+    ],
+    "globalContextNames": [
+      "log_observed_cpt_fraction",
+      "extent_x_over_32m",
+      "extent_y_over_32m",
+      "extent_z_over_16m",
+      "dx_over_2m",
+      "dy_over_2m",
+      "dz_over_2m",
+      "global_reconstructed_ic_mean_z",
+      "global_reconstructed_ic_std_z",
+      "valid_voxel_fraction",
+      "observed_valid_voxel_fraction"
+    ]
+  },
+  "normalization": {
+    "schemaGANMean": 2.7903323310879604,
+    "schemaGANStd": 0.7723778445702414
+  },
+  "featureBuilder": {
+    "source": "dqn3d/v46/features.py",
+    "legalCandidateRule": "valid.any(z) AND not observedXY AND accessMask",
+    "coordinateOrder": "(x,y)",
+    "diagonalMeters": "hypot(nx*dx_m, ny*dy_m)",
+    "adaptiveLocalRadiusMeters": "max(4.0, 2.0*max(dx_m,dy_m))",
+    "excludeCandidateFromLocalMean": true,
+    "candidateGlobalConcatenation": "candidate features first, then global context",
+    "globalContextTransforms": {
+      "log_observed_cpt_fraction": "log1p(n_sites)/log1p(possible_sites)",
+      "extent_x_over_32m": "log1p((nx*dx_m)/32)",
+      "extent_y_over_32m": "log1p((ny*dy_m)/32)",
+      "extent_z_over_16m": "log1p((nz*dz_m)/16)",
+      "dx_over_2m": "log1p(dx_m/2)",
+      "dy_over_2m": "log1p(dy_m/2)",
+      "dz_over_2m": "log1p(dz_m/2)"
+    }
+  },
+  "selection": {
+    "rule": "argmax Q among legal candidates",
+    "qValueUsedForStopping": false
+  }
+}

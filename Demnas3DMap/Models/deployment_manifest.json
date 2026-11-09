@@ -1,0 +1,47 @@
+{
+  "deploymentName": "CPT3D Sufficiency V3.1",
+  "frozen": true,
+  "schemaGAN": {
+    "version": "V4.2 Flexible",
+    "deployment": "CoreML",
+    "path": "model_export/Demnas3DMap_Integration_Flexible/SchemaGAN_V4_2_Flexible.mlpackage"
+  },
+  "dqn": {
+    "version": "V4.6-A",
+    "purpose": "next CPT recommendation only",
+    "stoppingCriterion": false
+  },
+  "uncertaintyV3": {
+    "artifact": "UncertaintyV3.json",
+    "featureCount": 10,
+    "calibrationCorrection": 0.0030156622852133743,
+    "sha256": "5108e9f44a0127cd10fb94c545944198ee7011f3c7fc983eefeb968c926348b0"
+  },
+  "sufficiencyV3_1": {
+    "artifact": "SufficiencyV3_1.json",
+    "featureCount": 10,
+    "probabilityThreshold": 0.9800000000000004,
+    "persistence": 3,
+    "sha256": "0ac3103e67f3bbc52f47d11069e49f2497ac644955958d840f6abc30e27dc618"
+  },
+  "finalValidation": {
+    "volumes": 100,
+    "stopVolumes": 46,
+    "safeStops": 44,
+    "falseStops": 2,
+    "falseStopFraction": 0.043,
+    "safeStopRecall": 0.677,
+    "medianStopCPT": 11.0,
+    "acceptance": "PASS"
+  },
+  "parity": {
+    "uncertaintyV3MaxAbsError": 0.0,
+    "sufficiencyV3_1MaxAbsError": 1.1102230246251565e-16
+  },
+  "notes": [
+    "V3.1 threshold is frozen at 0.98.",
+    "Stopping requires 3 consecutive positive decisions.",
+    "DQN Q-value is diagnostic only and is not a stopping criterion.",
+    "Actual coverage and ground truth are validation-only and unavailable in the app."
+  ]
+}

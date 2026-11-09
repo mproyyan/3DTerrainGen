@@ -1,0 +1,25 @@
+{
+  "name": "DQN V4.6-A iOS Deployment",
+  "frozen": true,
+  "checkpoint": "results/dqn_v46a_experimental/training_5000/best.pt",
+  "checkpointSHA256": "1c9ab00bcf9606dae8496ca2b08ea311252238a1d490ae219d7ac57f510dc20c",
+  "featureSourceSHA256": "d44e0f88924ba323917a12a62c7551e2e9d45415f77f87668e39b4a16fedee45",
+  "agentSourceSHA256": "95f5b9041381364e2d5bb62250758a73cdb6d36610f13ff9d9c047bdf76cb543",
+  "schemaVersion": "dqn-v4.6a-config-1",
+  "legacyVersionField": "dqn-v4.2",
+  "inputFeatureCount": 29,
+  "candidateFeatures": 18,
+  "globalFeatures": 11,
+  "parity": {
+    "sampleCount": 128,
+    "maxAbsoluteError": 5.960464477539063e-08,
+    "meanAbsoluteError": 1.57160684466362e-08,
+    "tolerance": 1e-05,
+    "status": "PASS"
+  },
+  "important": [
+    "Q-value ranks candidate CPT locations only.",
+    "Q-value is NOT a stopping criterion.",
+    "Sufficiency stopping is controlled by frozen V3.1."
+  ]
+}

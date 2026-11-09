@@ -19,6 +19,7 @@ struct Terrain3DView: View {
     @State private var slice = SubsurfaceSlice()
     @State private var showSliceControls = false
     @State private var selectedProfile: VerticalProfile?
+    @State private var profileMetric = SoilProfileMetric.ic
     @State private var hasInspectedModel = false
     @State private var inspectionMessage: String?
     @State private var depthScale: Float = 1
@@ -37,6 +38,7 @@ struct Terrain3DView: View {
                         let active = session.reconstructionTiles.isEmpty ? session.reconstruction.map { [$0] } ?? [] : session.reconstructionTiles
                         selectedProfile = VerticalProfile.inspect(east:position.x,north:position.y,
                                                                   volumes:active,risk:session.estimatedRisk)
+                        profileMetric = .ic
                         if selectedProfile != nil { hasInspectedModel = true }
                         if selectedProfile == nil { inspectionMessage = "Lokasi ini belum memiliki rekonstruksi Ic yang valid." }
                     })
@@ -181,7 +183,7 @@ struct Terrain3DView: View {
                             if session.reconstruction == nil {
                                 Text("Kolom mengikuti profil CPT terdekat; area abu-abu belum diketahui.")
                             } else {
-                                Text(session.dqnRecommendationSource == .dqnV45 ? "Warna lapisan: klasifikasi SBT dari Ic SchemaGAN V4.2; Potongan menampilkan bagian dalam." : "Warna lapisan: klasifikasi SBT dari Ic Model C; Potongan menampilkan bagian dalam.")
+                                Text(session.reconstructionStatus == .ready ? "Warna lapisan: klasifikasi SBT dari Ic SchemaGAN V4.2; Potongan menampilkan bagian dalam." : "Warna lapisan Ic belum tersedia.")
                                 Text("Hanya window dengan CPT yang direkonstruksi. Permukaan transparan menunjukkan konteks DEMNAS; area lain belum diketahui.")
                                 if session.estimatedRisk != nil {
                                     Text("Estimated Reconstruction Risk: biru 0, kuning 0,25, merah ≥0,50 Ic. Mode Gabungan memakai warna SBT asli dan transparansi risiko pada skala yang sama. Lapisan mempertahankan seluruh cakupan area; gunakan Potongan untuk penampang. CPT terukur tetap solid. Bukan calibrated confidence.")
@@ -223,21 +225,15 @@ struct Terrain3DView: View {
                     Text("Estimated Reconstruction Risk belum tersedia: \(riskError)")
                         .font(.caption2).foregroundStyle(.orange)
                 }
-                if let detail = session.v42Detail { Text(detail).font(.caption2).foregroundStyle(session.dqnRecommendationSource == .dqnV45 ? .green : .orange) }
-                if let q = session.v42QValue {
-                    Text(String(format: "Q-value DQN V4.5: %.6f (bukan confidence)", Double(q)))
-                        .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                if let detail = session.v42Detail { Text(detail).font(.caption2).foregroundStyle(session.dqnRecommendationSource == .dqnV46A ? .green : .orange) }
+                if session.recommendationSource == .dqnV46A, let q = session.v42QValue {
+                    Text(String(format: "Q-score rekomendasi DQN V4.6-A: %.6f", Double(q)))
+                        .font(.caption.monospacedDigit().bold()).foregroundStyle(.pink)
+                    Text("Skor model, bukan persentase confidence.")
+                        .font(.caption2).foregroundStyle(.secondary)
                 }
-                if session.recommendation != nil {
-                    Text(session.recommendationSource == .dqnV45
-                         ? "Titik merah muda: DQN V4.5, dihitung dari rekonstruksi SchemaGAN V4.2 pada satu grid."
-                         : session.recommendationSource == .dqnWindowedExperimental
-                         ? "Titik merah muda: DQN Windowed Experimental, dihitung pada satu window lokal; belum divalidasi di lapangan."
-                         : session.recommendationSource == .dqn
-                         ? "Titik merah muda: rekomendasi DQN."
-                         : session.recommendationSource == .explorationHeuristic
-                         ? "Titik merah muda: eksplorasi cakupan geometris (Heuristic), bukan DQN."
-                         : "Titik merah muda: rekomendasi Heuristic.")
+                if session.recommendationSource == .dqnV46A, session.recommendation != nil {
+                    Text("Titik merah muda: rekomendasi DQN V4.6-A.")
                         .font(.caption2).foregroundStyle(.secondary)
                 }
                 }
@@ -317,7 +313,9 @@ struct Terrain3DView: View {
         }
     }
     private func verticalProfilePanel(_ profile: VerticalProfile) -> some View {
-        NavigationStack {
+        let measured = measuredCPT(for:profile)
+        let samples = measured.flatMap { HardLayerAnalysisService.measuredSamples(for:$0) }
+        return NavigationStack {
             ScrollView {
                 VStack(alignment:.leading,spacing:12) {
                     Text(String(format:"East %.2f m · North %.2f m · grid (%d,%d)",
@@ -327,24 +325,21 @@ struct Terrain3DView: View {
                                 profile.depthAvailable,
                                 profile.deepestMeasured.map { String(format:"%.2f m",$0) } ?? "tidak ada"))
                         .font(.caption)
-                    hardLayerCard(for:profile)
+                    hardLayerCard(for:profile, measured:measured, samples:samples)
                     bearingCapacityCard
-                    if profile.points.count > 1 {
-                        Text("Ic → · Depth ↓").font(.caption.bold())
-                        GeometryReader { geometry in
-                            let lower = Double(profile.points.map(\.ic).min() ?? 0)
-                            let upper = Double(profile.points.map(\.ic).max() ?? 1)
-                            let span = max(upper-lower,0.1)
-                            Path { path in
-                                for (index,row) in profile.points.enumerated() {
-                                    let x = 12+CGFloat((Double(row.ic)-lower)/span)*(geometry.size.width-24)
-                                    let y = CGFloat(row.depthCenter/profile.depthAvailable)*geometry.size.height
-                                    if index == 0 { path.move(to:CGPoint(x:x,y:y)) }
-                                    else { path.addLine(to:CGPoint(x:x,y:y)) }
-                                }
-                            }.stroke(.teal,lineWidth:2)
-                        }.frame(height:140).padding(8).background(.quaternary,in:RoundedRectangle(cornerRadius:8))
+                    Picker("Profil",selection:$profileMetric) {
+                        ForEach(SoilProfileMetric.allCases.filter { $0 == .ic || $0 == .sbt ||
+                            (samples != nil && ($0 != .u2 || samples!.contains { $0.u2KPa != nil })) }) { metric in
+                            Text(metric.rawValue).tag(metric)
+                        }
+                    }.pickerStyle(.segmented)
+                    if profileMetric != .sbt {
+                        let series = profileSeries(profile:profile,samples:samples,metric:profileMetric)
+                        if series.count > 1 {
+                            profileChart(series,maximumDepth:profileMetric == .ic ? profile.depthAvailable : (samples?.last?.depth ?? profile.depthAvailable))
+                        }
                     }
+                    if profileMetric == .ic || profileMetric == .sbt {
                     ForEach(Array(profile.points.enumerated()),id:\.offset) { _, row in
                         HStack(alignment:.top) {
                             Text(String(format:"%.1f–%.1f m",row.depthFrom,row.depthTo))
@@ -361,6 +356,17 @@ struct Terrain3DView: View {
                         }.font(.caption.monospacedDigit())
                         Divider()
                     }
+                    } else if let samples {
+                        ForEach(Array(samples.enumerated()),id:\.offset) { _, sample in
+                            if let value = profileMetric.value(sample) {
+                                HStack {
+                                    Text(String(format:"%.2f m",sample.depth))
+                                    Spacer()
+                                    Text(String(format:"%.3f %@",value,profileMetric.unit))
+                                }.font(.caption.monospacedDigit())
+                            }
+                        }
+                    }
                     Text("Profil ini deskriptif; tidak menentukan kapan investigasi CPT dihentikan.")
                         .font(.caption2).foregroundStyle(.secondary)
                 }.padding()
@@ -372,22 +378,68 @@ struct Terrain3DView: View {
             } }
         }
     }
-    private func hardLayerCard(for profile: VerticalProfile?) -> some View {
-        GroundMetricStatusCard(
-            title:"Hard Layer Depth",
-            unavailableStatus:"Belum dapat ditentukan",
+    private func measuredCPT(for profile: VerticalProfile) -> CPTPoint? {
+        let active = session.reconstructionTiles.isEmpty ? session.reconstruction.map { [$0] } ?? [] : session.reconstructionTiles
+        guard active.indices.contains(profile.volumeIndex) else { return nil }
+        return HardLayerAnalysisService.measuredPoint(gridX:profile.x,gridY:profile.y,
+            volume:active[profile.volumeIndex],points:session.points,
+            boundary:session.selection.coordinates.map { GeoPoint($0) })
+    }
+    private func profileSeries(profile: VerticalProfile, samples: [CPTSample]?,
+                               metric: SoilProfileMetric) -> [(depth:Double,value:Double)] {
+        if metric == .ic { return profile.points.map { ($0.depthCenter,Double($0.ic)) } }
+        return samples?.compactMap { sample in metric.value(sample).map { (sample.depth,$0) } } ?? []
+    }
+    private func profileChart(_ values: [(depth:Double,value:Double)], maximumDepth: Double) -> some View {
+        VStack(alignment:.leading,spacing:4) {
+            Text("\(profileMetric.rawValue) → · Depth ↓").font(.caption.bold())
+            GeometryReader { geometry in
+                let lower = values.map(\.value).min() ?? 0
+                let upper = values.map(\.value).max() ?? 1
+                let span = max(upper-lower,0.1)
+                Path { path in
+                    for (index,row) in values.enumerated() {
+                        let x = 12+CGFloat((row.value-lower)/span)*(geometry.size.width-24)
+                        let y = CGFloat(row.depth/max(maximumDepth,0.1))*geometry.size.height
+                        if index == 0 { path.move(to:CGPoint(x:x,y:y)) }
+                        else { path.addLine(to:CGPoint(x:x,y:y)) }
+                    }
+                }.stroke(.teal,lineWidth:2)
+            }.frame(height:140).padding(8).background(.quaternary,in:RoundedRectangle(cornerRadius:8))
+        }
+    }
+    private func hardLayerCard(for profile: VerticalProfile?, measured: CPTPoint? = nil,
+                               samples: [CPTSample]? = nil) -> some View {
+        let indication = samples.flatMap { HardLayerAnalysisService.indication(samples:$0) }
+        return GroundMetricStatusCard(
+            title:"Indikasi Lapisan Keras",
+            unavailableStatus:samples == nil ? "Belum tersedia di lokasi ini" : "Belum teridentifikasi",
             selectedLocation:profile.map { String(format:"Selected location: X %.2f m · Y %.2f m",
                                                     $0.east,$0.north) },
-            explanation:"Ic/SBT menggambarkan perilaku tanah, bukan kekerasan tanah secara langsung.",
-            available:["Ic reconstruction","SBT profile"],
-            required:["CPT qc/fs profile untuk titik ini","Validated hard-layer criterion"],
-            details:PreliminaryGroundAssessment.hardLayer)
+            explanation:samples == nil
+                ? "Analisis membutuhkan profil CPT langsung pada lokasi tersebut."
+                : indication == nil
+                    ? "Profil CPT ini belum menunjukkan tahanan konus tinggi yang persisten sesuai criterion saat ini."
+                    : "Diidentifikasi dari tahanan konus (qc) yang persisten pada CPT ini.",
+            available:[],required:[],
+            details:hardLayerDetails(indication:indication, hasMeasured:samples != nil),
+            estimate:indication.map { String(format:"%.2f m",$0.depth) },
+            estimateLabel:indication == nil ? nil : "PoC / experimental")
+    }
+    private func hardLayerDetails(indication: HardLayerIndication?, hasMeasured: Bool) -> String {
+        var details = String(format:"qc threshold: %.3f MPa · minimum continuous thickness: %.2f m · PoC / experimental. Bukan kedalaman lapisan keras yang tervalidasi untuk desain pondasi.",
+                             HardLayerAnalysisService.qcThresholdMPa,HardLayerAnalysisService.minimumContinuousThicknessM)
+        if let indication {
+            details += String(format:" Confirmed until: %.2f m · qc at candidate depth: %.3f MPa · mean qc: %.3f MPa.",
+                              indication.confirmedUntilDepth,indication.startQcMPa,indication.meanQcMPa)
+        } else if !hasMeasured { details += " Memerlukan profil CPT aktual; Ic/SBT rekonstruksi tidak digunakan untuk menghitung qc." }
+        return details
     }
     private var bearingCapacityCard: some View {
         GroundMetricStatusCard(
             title:"Bearing Capacity",
-            unavailableStatus:"Belum dapat dihitung",
-            explanation:"Data saat ini belum cukup untuk estimasi kapasitas dukung yang dapat digunakan untuk desain.",
+            unavailableStatus:"Belum cukup data untuk menghitung kapasitas",
+            explanation:"Data yang tersedia belum cukup untuk menghitung kapasitas dukung secara andal.",
             available:[],
             required:["CPT qc/fs untuk perhitungan","Foundation type / geometry",
                       "Foundation depth","Validated geotechnical method / correlation"],
@@ -409,7 +461,7 @@ struct Terrain3DView: View {
     private var diagnosticsText: String {
         var lines = ["Demnas3DMap · Simulation Diagnostics",
                      "SchemaGAN: \(session.reconstructionStatus.rawValue) · \(session.reconstructionSummary ?? session.reconstructionError ?? "belum tersedia")",
-                     "Uncertainty V2: \(session.estimatedRisk != nil ? "ready" : session.estimatedRiskError ?? "menunggu")",
+                     "Uncertainty V3: \(session.estimatedRisk != nil ? "ready" : session.estimatedRiskError ?? "menunggu")",
                      "CPT Ic lengkap: \(session.points.filter(\.isComplete).count) / \(session.points.count)"]
         if let volume = session.reconstruction {
             let grid = volume.grid
@@ -447,39 +499,31 @@ struct Terrain3DView: View {
                 lines.append(String(format:"Jarak horizontal pusat marker–pusat voxel LOD: %.5f world unit",gap))
             }
         }
-        if let diagnostics = session.v45Diagnostics, let volume = session.reconstruction {
-            let scores = diagnostics.scores
-            let expectedEast = volume.east(x:scores.best.x)
-            let expectedNorth = volume.north(y:scores.best.y)
-            lines.append(String(format:"DQN grid XY (%d,%d) → east %.4f m, north %.4f m → RealityKit local X %.4f, Z %.4f",
-                                scores.best.x,scores.best.y,expectedEast,expectedNorth,expectedEast,-expectedNorth))
-            if let marker = session.rendererDiagnostics?.markerLocal {
-                lines.append(String(format:"Selisih grid–marker lokal horizontal: %.5f m",
-                                    hypot(Double(marker.x)-expectedEast,Double(marker.z)+expectedNorth)))
-            }
-            lines.append(String(format:"DQN V4.5: %d kandidat legal · Q min %.6f · mean %.6f · max %.6f",
-                                scores.legalCount,scores.minimumQ,scores.meanQ,scores.maximumQ))
-            lines.append(String(format:"DQN timing: SchemaGAN %.3f s · fitur %.3f s · Q scoring %.3f s",
-                                diagnostics.schemaSeconds,diagnostics.featureSeconds,diagnostics.scoringSeconds))
-            if let rec = session.dqnRecommendation {
-                let nearest = session.points.filter(\.isComplete).map {
-                    CoordinateTransformer.localMeters($0.coordinate,origin:rec).length
-                }.min() ?? .nan
-                lines.append(String(format:"Rekomendasi: lat %.7f · lon %.7f · CPT terdekat %.2f m",
-                                    rec.latitude,rec.longitude,nearest))
-            }
-            lines.append("10 kandidat Q terbaik:")
-            for (rank,candidate) in scores.top.enumerated() {
-                let geo = CoordinateTransformer.geographic(east:volume.east(x:candidate.x),
-                                                           north:volume.north(y:candidate.y),origin:volume.terrainOrigin)
-                lines.append(String(format:"%d. (%d,%d) lat %.7f lon %.7f Q %.6f",
-                                    rank+1,candidate.x,candidate.y,geo.latitude,geo.longitude,candidate.qValue))
-            }
+        if session.recommendationSource == .dqnV46A, let recommendation = session.recommendation {
+            lines.append(String(format:"DQN V4.6-A: lat %.7f · lon %.7f · Q %.6f",
+                                recommendation.latitude,recommendation.longitude,Double(session.v42QValue ?? .nan)))
+            if let info = session.dqnInfo { lines.append(info) }
         } else {
-            lines.append("DQN: \(session.v42Detail ?? session.dqnError ?? "belum tersedia")")
+            lines.append("DQN: \(session.v42Detail ?? "belum tersedia")")
         }
         lines.append("Risk adalah estimated error, bukan calibrated confidence. Q bukan confidence.")
         return lines.joined(separator:"\n")
+    }
+}
+
+private enum SoilProfileMetric: String, CaseIterable, Identifiable {
+    case ic = "Ic", qc = "qc", fs = "fs", u2 = "u2", sbt = "SBT"
+    var id: String { rawValue }
+    var unit: String {
+        switch self { case .qc: "MPa"; case .fs, .u2: "kPa"; default: "" }
+    }
+    func value(_ sample: CPTSample) -> Double? {
+        switch self {
+        case .qc: sample.qcMPa
+        case .fs: sample.fsKPa
+        case .u2: sample.u2KPa
+        case .ic, .sbt: nil
+        }
     }
 }
 
@@ -513,23 +557,18 @@ private struct GroundMetricStatusCard: View {
                 Text(estimateLabel).font(.caption.bold()).foregroundStyle(.secondary)
             }
             Text(explanation).font(.subheadline).foregroundStyle(.secondary)
-            if !available.isEmpty {
-                Text("Data tersedia").font(.caption.bold()).padding(.top,2)
-                ForEach(available,id:\.self) { item in
-                    Label(item,systemImage:"checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                }
-            }
-            if !required.isEmpty {
-                Text("Masih dibutuhkan").font(.caption.bold()).padding(.top,2)
-                ForEach(required,id:\.self) { item in
-                    Label(item,systemImage:"circle.dotted")
-                        .foregroundStyle(.secondary)
-                }
-            }
             DisclosureGroup("Details",isExpanded:$showsDetails) {
-                Text(details).font(.caption).foregroundStyle(.secondary)
-                    .frame(maxWidth:.infinity,alignment:.leading)
+                VStack(alignment:.leading,spacing:6) {
+                    if !available.isEmpty {
+                        Text("Data tersedia").font(.caption.bold())
+                        ForEach(available,id:\.self) { Label($0,systemImage:"checkmark.circle.fill") }
+                    }
+                    if !required.isEmpty {
+                        Text("Masih dibutuhkan").font(.caption.bold())
+                        ForEach(required,id:\.self) { Label($0,systemImage:"circle.dotted") }
+                    }
+                    Text(details).font(.caption)
+                }.foregroundStyle(.secondary).frame(maxWidth:.infinity,alignment:.leading)
             }.font(.caption)
         }
         .font(.caption)
@@ -707,7 +746,7 @@ private struct TerrainRenderer: UIViewRepresentable {
                 return sphere
             }
             for point in points { _ = marker(point.coordinate, point.isComplete ? .systemGreen : .systemOrange, point.name) }
-            if let recommendation { recommendationMarker = marker(recommendation, .systemPink, recommendationSource == .dqnV45 ? "DQN V4.5" : recommendationSource == .dqn ? "DQN V3" : recommendationSource == .dqnWindowedExperimental ? "DQN Windowed Experimental" : recommendationSource == .explorationHeuristic ? "Eksplorasi Heuristic" : "Heuristic geometris") }
+            if recommendationSource == .dqnV46A, let recommendation { recommendationMarker = marker(recommendation, .systemPink, "DQN V4.6-A") }
             let maxDepth = Float(volume == nil ? (columns.map(\.bottom).max() ?? 0) : Double(volume!.grid.nz) * volume!.grid.depthSpacingMeters)*depthScale
             let low = Float(terrain.minimum-terrain.elevationOrigin)-maxDepth
             let high = Float(terrain.maximum-terrain.elevationOrigin)+Float(markerRadius*3)

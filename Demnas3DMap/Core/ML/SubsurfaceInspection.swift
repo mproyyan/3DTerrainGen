@@ -123,6 +123,7 @@ struct VerticalProfilePoint: Sendable {
 
 struct VerticalProfile: Sendable, Identifiable {
     let id = UUID()
+    let volumeIndex: Int
     let east: Double
     let north: Double
     let x: Int
@@ -153,7 +154,7 @@ struct VerticalProfile: Sendable, Identifiable {
                              measured:volume.observed[index],
                              estimatedRiskIc:matchingRisk ? risk?.value(x:x,y:y,z:z) : nil)
             }
-            return .init(east:east,north:north,
+            return .init(volumeIndex:volumeIndex,east:east,north:north,
                          x:x,y:y,depthAvailable:Double(grid.nz)*grid.depthSpacingMeters,
                          points:rows)
         }

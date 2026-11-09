@@ -6,11 +6,8 @@ enum ReconstructionStatus: String {
 }
 
 enum RecommendationSource: String {
-    case none, heuristic, dqn
-    case dqnV42 = "DQN V4.2"
-    case dqnV45 = "DQN V4.5"
-    case explorationHeuristic = "Explorasi Heuristic"
-    case dqnWindowedExperimental = "DQN Windowed Experimental"
+    case none
+    case dqnV46A = "DQN V4.6-A"
 }
 
 enum DQNStatus: String {
@@ -29,7 +26,6 @@ final class TerrainSession {
     var savedAt: Date?
     var recommendation: GeoPoint?
     var recommendationSource = RecommendationSource.none
-    var explorationRecommendation: GeoPoint?
     var dqnRecommendation: GeoPoint?
     var dqnRecommendationSource = RecommendationSource.none
     var dqnStatus = DQNStatus.unavailable
@@ -38,6 +34,13 @@ final class TerrainSession {
     var v42Detail: String?
     var v42QValue: Float?
     var v45Diagnostics: V45RunDiagnostics?
+    private(set) var investigationAssessment: CoverageV1Assessment?
+    private var coverageHistory = CoverageV1History()
+    private var assessmentInputKey: String?
+    private var assessmentGeneration = 0
+    private var assessmentTask: Task<(ReconstructionVolume, CoverageV1Assessment, CoverageV1History), Error>?
+    var minimumRecommendationSpacingMeters: Double?
+    private var v46Task: Task<V46Recommendation?, Error>?
     var rendererDiagnostics: RendererDiagnostics?
     private var dqnTask: Task<AdaptiveDQNResult?, Error>?
     private var v42Task: Task<V42Recommendation?, Error>?
@@ -81,156 +84,166 @@ final class TerrainSession {
 
     func refreshInvestigation() {
         revision += 1
-        let exploration = mesh.flatMap { AreaExplorationPlanner.recommend(terrain: $0, points: points) }
-        explorationRecommendation = exploration?.coordinate
-        dqnRecommendation = nil
-        dqnRecommendationSource = .none
-        recommendation = explorationRecommendation ?? mesh.flatMap {
-            InvestigationSimulator.recommendation(points: points, scenario: scenario, terrain: $0)
-        }
-        recommendationSource = exploration != nil ? .explorationHeuristic : recommendation == nil ? .none : .heuristic
-        refreshReconstructionIfNeeded()
-        refreshDQNIfNeeded()
+        refreshAssessmentIfNeeded()
     }
 
-    private func refreshDQNIfNeeded() {
-        let key = points.map { "\($0.id.uuidString):\($0.updatedAt?.timeIntervalSince1970 ?? 0)" }.joined(separator: "|") + ":\(scenario.rawValue)"
-        // A refreshed recommendation must rerun ML even when CPT timestamps are unchanged.
-        dqnInputKey = key
-        dqnGeneration += 1
-        dqnTask?.cancel()
-        v42Task?.cancel()
-        dqnTask = nil
-        v42Task = nil
-        dqnError = nil
-        dqnInfo = nil
-        v42QValue = nil
-        v45Diagnostics = nil
-        guard let mesh else {
-            dqnStatus = .unavailable
-            v42Detail = "DQN V4.5 belum dijalankan: terrain belum dibuat."
-            return
-        }
-        guard status.completed > 0 else {
-            dqnStatus = .unavailable
-            v42Detail = "DQN V4.5 menunggu minimal satu CPT dengan profil Ic tersimpan."
-            return
-        }
-        guard status.pending == 0 else {
-            dqnStatus = .unavailable
-            v42Detail = "DQN V4.5 menunggu hasil semua titik CPT yang sudah ditetapkan (\(status.pending) belum lengkap)."
-            return
-        }
-        let currentGeneration = dqnGeneration
-        let boundary = selection.coordinates.map { GeoPoint($0) }
+    private func refreshAssessmentIfNeeded() {
         let complete = points.filter(\.isComplete)
-        guard let extent = try? MetricExtent(boundary: boundary, origin: mesh.origin) else {
-            dqnStatus = .fallback
-            v42Detail = "DQN V4.5 belum dijalankan: ukuran poligon tidak dapat dihitung dalam meter."
+        if complete.count == 0 || (coverageHistory.evaluations.last?.count ?? 0) > complete.count {
+            coverageHistory.reset()
+            investigationAssessment = nil
+        }
+        let key = UncertaintyV2Features.inputKey(points: complete, resolutionMeters: spatialResolutionMeters,
+                                                 boundary: selection.coordinates.map { GeoPoint($0) })
+        guard key != assessmentInputKey else { return }
+        assessmentInputKey = key
+        assessmentGeneration += 1
+        let generation = assessmentGeneration
+        assessmentTask?.cancel(); assessmentTask = nil
+        v46Task?.cancel(); v46Task = nil
+        dqnTask?.cancel(); v42Task?.cancel(); dqnTask = nil; v42Task = nil
+        uncertaintyTask?.cancel(); estimatedRisk = nil; estimatedRiskError = nil; estimatedRiskVersion += 1
+        reconstructionTask?.cancel(); reconstructionTask = nil
+        reconstruction = nil; reconstructionTiles = []; reconstructionError = nil; reconstructionVersion += 1
+        recommendation = nil; recommendationSource = .none
+        dqnRecommendation = nil; dqnRecommendationSource = .none
+        v42QValue = nil; v45Diagnostics = nil; dqnInfo = nil; dqnError = nil
+        investigationAssessment = nil
+        minimumRecommendationSpacingMeters = nil
+        guard let mesh, !complete.isEmpty else {
+            reconstructionStatus = .unavailable; dqnStatus = .unavailable
             return
         }
-        if let plan = try? V42GridPlan.make(extent: extent, points: complete, preferredMeters: spatialResolutionMeters) {
-            v42Detail = String(format: "SchemaGAN V4.2 Flexible + DQN V4.5 sedang menghitung area %.1f × %.1f m pada grid %d × %d × %d @ %.2f m/sel.", extent.width, extent.height, plan.nx, plan.ny, plan.nz, plan.horizontalMeters)
-            dqnStatus = .recommending
-            let preferredMeters = spatialResolutionMeters
-            let job = Task.detached(priority: .userInitiated) {
-                try await V45RecommendationService.recommend(terrain: mesh, boundary: boundary, points: complete,
-                                                            preferredMeters: preferredMeters)
-            }
-            v42Task = job
-            Task {
-                do {
-                    let result = try await job.value
-                    guard !job.isCancelled, currentGeneration == dqnGeneration else { return }
-                    guard let result else {
-                        dqnStatus = .fallback
-                        dqnError = "Tidak ada kandidat legal DQN V4.5; pilih titik manual atau eksplorasi."
-                        v42Detail = "DQN V4.5 dijalankan tetapi tidak menemukan kandidat legal pada grid yang dipilih."
-                        return
-                    }
-                    dqnRecommendation = result.coordinate
-                    dqnRecommendationSource = .dqnV45
-                    recommendation = result.coordinate
-                    recommendationSource = .dqnV45
-                    dqnInfo = "DQN V4.5 on-device: \(result.volume.grid.nx) × \(result.volume.grid.ny) × \(result.volume.grid.nz) sel @ \(result.volume.grid.spacingMeters.formatted()) m; Q-value seluruh kandidat legal dibandingkan pada satu grid."
-                    v42QValue = result.qValue
-                    v45Diagnostics = result.v45Diagnostics
-                    v42Detail = String(format: "DQN V4.5 aktif dengan SchemaGAN V4.2 Flexible: area %.1f × %.1f m, grid %d × %d × %d @ %.2f m/sel horizontal.", extent.width, extent.height, result.volume.grid.nx, result.volume.grid.ny, result.volume.grid.nz, result.volume.grid.spacingMeters)
-                    dqnStatus = .ready
-                    reconstruction = result.volume
-                    reconstructionError = nil
-                    reconstructionTiles = [result.volume]
-                    reconstructionSummary = "SchemaGAN V4.2 Flexible: Ic 3D pada grid \(result.volume.grid.nx) × \(result.volume.grid.ny) × \(result.volume.grid.nz); nilai CPT terukur dipertahankan."
-                    reconstructionVersion += 1
-                    reconstructionStatus = .ready
-                    let riskJob = Task.detached(priority: .utility) {
-                        let model = try UncertaintyV2Model.bundled()
-                        return try UncertaintyV2Features.makeMap(volume: result.volume, model: model)
-                    }
-                    uncertaintyTask = riskJob
-                    Task {
-                        do {
-                            let risk = try await riskJob.value
-                            guard !riskJob.isCancelled, currentGeneration == dqnGeneration else { return }
-                            estimatedRisk = risk
-                            estimatedRiskVersion += 1
-                        } catch is CancellationError { return }
-                        catch {
-                            guard !riskJob.isCancelled, currentGeneration == dqnGeneration else { return }
-                            estimatedRiskError = error.localizedDescription
-                        }
-                    }
-                } catch is CancellationError { return }
-                catch {
-                    guard !job.isCancelled, currentGeneration == dqnGeneration else { return }
-                    dqnStatus = .fallback
-                    dqnError = error.localizedDescription
-                    v42Detail = "DQN V4.5 dijalankan tetapi gagal: \(error.localizedDescription)"
-                }
-            }
-            return
+        let boundary = selection.coordinates.map { GeoPoint($0) }
+        let resolution = spatialResolutionMeters
+        let history = coverageHistory
+        #if DEBUG
+        print("[Coverage V1] CPT count=\(complete.count); preferred resolution=\(resolution) m")
+        print("[Coverage V1] bundle=\(Bundle.main.bundlePath)")
+        for name in ["CoverageV1", "UncertaintyV3"] {
+            print("[Coverage V1] resource \(name).json: \(Bundle.main.url(forResource: name, withExtension: "json")?.path ?? "MISSING")")
         }
-        let planningError: String
-        do { _ = try V42GridPlan.make(extent: extent, points: complete, preferredMeters: spatialResolutionMeters); planningError = "Grid tidak kompatibel." }
-        catch { planningError = error.localizedDescription }
-        v42Detail = "DQN V4.5 tidak tersedia: \(planningError) Mencoba pipeline V3 lokal eksperimental; titik eksplorasi tetap Heuristic."
-        dqnStatus = .recommending
-        let job = Task.detached(priority: .userInitiated) {
-            try await AdaptiveDQNRecommendationService.recommend(terrain: mesh, boundary: boundary, points: complete)
+        print("[Coverage V1] resource DQN_V4_6_A.mlmodelc: \(Bundle.main.url(forResource: "DQN_V4_6_A", withExtension: "mlmodelc")?.path ?? "MISSING")")
+        #endif
+        reconstructionStatus = .reconstructing; dqnStatus = .unavailable
+        v42Detail = "SchemaGAN V4.2 → Coverage V1 sedang dihitung."
+        let job = Task.detached(priority: .userInitiated) { () throws -> (ReconstructionVolume, CoverageV1Assessment, CoverageV1History) in
+            var stage = "CPT/grid preprocessing"
+            do {
+            #if DEBUG
+            print("[Coverage V1] preparing SchemaGAN input")
+            #endif
+            let input = try V42Input.prepare(terrain: mesh, boundary: boundary, points: complete,
+                                             preferredMeters: resolution)
+            #if DEBUG
+            print("[Coverage V1] SchemaGAN input grid=\(input.nx)×\(input.ny)×\(input.nz); valid XY=\(input.validXY.filter { $0 }.count); observed voxels=\(input.observed.filter { $0 }.count)")
+            #endif
+            stage = "SchemaGAN model load/inference"
+            let schema = try V42SchemaGANService()
+            let values = try await schema.reconstruct(input)
+            try Task.checkCancellation()
+            stage = "SchemaGAN output validation"
+            let volume = try input.volume(values)
+            #if DEBUG
+            let validVoxelCount = volume.validXY.filter { $0 }.count * volume.grid.nz
+            let observedValidCount = volume.observed.indices.filter { volume.observed[$0] }.count
+            print("[Coverage V1] SchemaGAN reconstruction succeeded; grid=\(volume.grid.nx)×\(volume.grid.ny)×\(volume.grid.nz); valid voxels=\(validVoxelCount); unobserved valid voxels=\(validVoxelCount - observedValidCount)")
+            #endif
+            stage = "CoverageV1.json load / voxel inference"
+            let coverage = try CoverageV1Service.bundled()
+            var updatedHistory = history
+            let assessment = try CoverageV1Pipeline.assess(volume: volume, nCPT: complete.count,
+                                                            service: coverage, history: &updatedHistory)
+            return (volume, assessment, updatedHistory)
+            } catch {
+                #if DEBUG
+                print("[Coverage V1] stage=\(stage) FAILED: \(String(reflecting: error))")
+                #endif
+                throw error
+            }
         }
-        dqnTask = job
+        assessmentTask = job
         Task {
             do {
-                let candidate = try await job.value
-                guard !job.isCancelled, currentGeneration == dqnGeneration else { return }
-                if let candidate {
-                    dqnRecommendation = candidate.coordinate
-                    dqnRecommendationSource = candidate.windowed ? .dqnWindowedExperimental : .dqn
-                    recommendation = candidate.coordinate
-                    recommendationSource = dqnRecommendationSource
-                    dqnInfo = candidate.explanation
-                    dqnStatus = .ready
+                let (volume, assessment, updatedHistory) = try await job.value
+                guard !job.isCancelled, generation == assessmentGeneration else { return }
+                coverageHistory = updatedHistory
+                investigationAssessment = assessment
+                minimumRecommendationSpacingMeters = V46FeatureAdapter.recommendationSpacing(grid: volume.grid)
+                reconstruction = volume; reconstructionTiles = [volume]
+                reconstructionVersion += 1; reconstructionStatus = .ready
+                reconstructionError = nil
+                reconstructionSummary = "SchemaGAN V4.2 Flexible: Ic 3D pada grid \(volume.grid.nx) × \(volume.grid.ny) × \(volume.grid.nz); nilai CPT terukur dipertahankan."
+                if assessment.advisoryHigh {
+                    v42Detail = "Kecukupan Investigasi: Tinggi. Verifikasi engineer tetap diperlukan; DQN dapat menyarankan titik tambahan."
                 } else {
-                    dqnStatus = .fallback
-                    dqnError = "Tidak ada kandidat DQN yang memenuhi batas area dan jarak CPT."
+                    v42Detail = "Kecukupan Investigasi: Belum Memadai. Investigasi tambahan direkomendasikan."
                 }
-            } catch is CancellationError {
-                return
-            } catch {
-                guard !job.isCancelled, currentGeneration == dqnGeneration else { return }
-                dqnStatus = .fallback
-                dqnError = error.localizedDescription
+                    dqnStatus = .recommending
+                    let dqnJob = Task.detached(priority: .userInitiated) {
+                        try await V46RecommendationService.recommend(volume: volume, terrain: mesh,
+                                                                      minimumSpacingMeters: V46FeatureAdapter.recommendationSpacing(grid: volume.grid),
+                                                                      measuredCPT: complete.map(\.coordinate))
+                    }
+                    v46Task = dqnJob
+                    do {
+                        let result = try await CoverageV1RecommendationPolicy.next(assessment: assessment) {
+                            try await dqnJob.value
+                        }
+                        guard !dqnJob.isCancelled, generation == assessmentGeneration else { return }
+                        if let result {
+                            dqnRecommendation = result.coordinate
+                            dqnRecommendationSource = .dqnV46A
+                            recommendation = result.coordinate
+                            recommendationSource = .dqnV46A
+                            v42QValue = result.qValue
+                            dqnInfo = "DQN V4.6-A: \(result.legalCount) kandidat legal dinilai; Q-value hanya untuk ranking lokasi."
+                            dqnStatus = .ready
+                        } else {
+                            dqnStatus = .unavailable
+                            dqnError = "Rekomendasi DQN belum tersedia."
+                            #if DEBUG
+                            print("DQN V4.6-A failed: no legal candidate returned")
+                            #endif
+                        }
+                    } catch is CancellationError { return }
+                    catch {
+                        guard generation == assessmentGeneration else { return }
+                        dqnStatus = .unavailable; dqnError = "Rekomendasi DQN belum tersedia."
+                        #if DEBUG
+                        print("DQN V4.6-A failed: \(error)")
+                        #endif
+                    }
+                let riskJob = Task.detached(priority: .utility) {
+                    let model = try UncertaintyV3Service.bundled()
+                    return try UncertaintyV3MapFactory.makeMap(volume: volume, service: model)
+                }
+                uncertaintyTask = riskJob
+                Task {
+                    do {
+                        let risk = try await riskJob.value
+                        guard !riskJob.isCancelled, generation == assessmentGeneration else { return }
+                        estimatedRisk = risk; estimatedRiskVersion += 1
+                    } catch is CancellationError { return }
+                    catch { if generation == assessmentGeneration { estimatedRiskError = error.localizedDescription } }
+                }
+            } catch is CancellationError { return }
+            catch {
+                guard !job.isCancelled, generation == assessmentGeneration else { return }
+                reconstructionStatus = .error; reconstructionError = error.localizedDescription
+                dqnStatus = .unavailable; dqnError = "Rekomendasi DQN belum tersedia."
+                #if DEBUG
+                print("[Coverage V1] ASSESSMENT UNAVAILABLE: \(String(reflecting: error))")
+                print("[Coverage V1] DQN V4.6-A blocked because coverage assessment is unavailable")
+                #endif
+                v42Detail = "Predicted Coverage belum tersedia; DQN V4.6-A tidak dijalankan."
             }
         }
     }
 
     func chooseRecommendation(_ source: RecommendationSource) {
         switch source {
-        case .explorationHeuristic:
-            guard let explorationRecommendation else { return }
-            recommendation = explorationRecommendation
-            recommendationSource = .explorationHeuristic
-        case .dqn, .dqnWindowedExperimental, .dqnV42, .dqnV45:
+        case .dqnV46A:
             guard let dqnRecommendation else { return }
             recommendation = dqnRecommendation
             recommendationSource = dqnRecommendationSource
@@ -275,7 +288,7 @@ final class TerrainSession {
             do {
                 let result = try await job.value
                 guard !job.isCancelled, currentGeneration == reconstructionGeneration else { return }
-                if dqnRecommendationSource == .dqnV45 { return }
+                if assessmentTask != nil { return }
                 reconstructionTiles = result.volumes
                 reconstruction = result.volumes.first
                 reconstructionSummary = "\(result.volumes.count)/\(result.plannedWindows) window Model C; \(result.windowsWithoutCPT) tanpa CPT, \(result.unsupportedWindows) tidak kompatibel. Overlap dibaurkan; bukan inference global."
@@ -462,17 +475,23 @@ final class TerrainSession {
             self.importedDEM = nil
         }
         mesh = result; terrainRevision += 1; points = []; recommendation = nil; placingCPT = false
+        assessmentTask?.cancel(); assessmentTask = nil; assessmentInputKey = nil; assessmentGeneration += 1
+        v46Task?.cancel(); v46Task = nil
+        coverageHistory.reset(); investigationAssessment = nil; minimumRecommendationSpacingMeters = nil
         reconstructionTask?.cancel(); uncertaintyTask?.cancel(); estimatedRisk = nil; estimatedRiskError = nil; estimatedRiskVersion += 1; reconstructionInputKey = nil; reconstruction = nil; reconstructionTiles = []; reconstructionSummary = nil; reconstructionVersion += 1
         dqnTask?.cancel(); v42Task?.cancel(); v42Task = nil; dqnInputKey = nil; dqnStatus = .unavailable; dqnError = nil; dqnInfo = nil; v42Detail = nil; v42QValue = nil
-        dqnRecommendation = nil; dqnRecommendationSource = .none; explorationRecommendation = nil
+        dqnRecommendation = nil; dqnRecommendationSource = .none
         refreshInvestigation(); persist()
     }
     func cancel() { importing?.cancel(); generating?.cancel() }
     func reset() {
+        assessmentTask?.cancel(); assessmentTask = nil; assessmentInputKey = nil; assessmentGeneration += 1
+        v46Task?.cancel(); v46Task = nil
+        coverageHistory.reset(); investigationAssessment = nil; minimumRecommendationSpacingMeters = nil
         selection.reset(); mesh = nil; terrainRevision += 1; drawing = false; placingCPT = false; spatialResolutionMeters = 1
         points = []; recommendation = nil; recommendationSource = .none; savedAt = nil; revision += 1
         dqnTask?.cancel(); v42Task?.cancel(); dqnTask = nil; v42Task = nil; dqnInputKey = nil; dqnError = nil; dqnInfo = nil; v42Detail = nil; v42QValue = nil; dqnStatus = .unavailable
-        dqnRecommendation = nil; dqnRecommendationSource = .none; explorationRecommendation = nil
+        dqnRecommendation = nil; dqnRecommendationSource = .none
         reconstructionTask?.cancel(); uncertaintyTask?.cancel(); uncertaintyTask = nil; estimatedRisk = nil; estimatedRiskError = nil; estimatedRiskVersion += 1; reconstructionTask = nil; reconstructionInputKey = nil
         reconstruction = nil; reconstructionTiles = []; reconstructionSummary = nil; reconstructionVersion += 1; reconstructionError = nil; reconstructionStatus = .unavailable
         if let importedDEM { try? FileManager.default.removeItem(at: importedDEM.directory); self.importedDEM = nil }
@@ -481,6 +500,8 @@ final class TerrainSession {
         } catch { errorMessage = "Tidak dapat menghapus proyek tersimpan: \(error.localizedDescription)" }
     }
     isolated deinit {
+        assessmentTask?.cancel()
+        v46Task?.cancel()
         generating?.cancel()
         importing?.cancel()
         reconstructionTask?.cancel()
