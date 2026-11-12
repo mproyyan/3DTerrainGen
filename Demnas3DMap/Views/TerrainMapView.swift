@@ -292,13 +292,11 @@ struct TerrainMapView: View {
             }.font(.subheadline)
             if let assessment = session.investigationAssessment {
                 VStack(alignment:.leading,spacing:4) {
-                    Text(String(format:"Predicted Coverage: %.1f%%",assessment.predictedCoverage * 100))
+                    Text(String(format:"Predicted Coverage: %.1f%%",assessment.summary.predictedCoverage * 100))
                         .font(.subheadline.monospacedDigit().bold())
-                    Text(assessment.advisoryHigh ? "Kecukupan Investigasi: Tinggi" : "Kecukupan Investigasi: Belum Memadai")
+                    Text(session.gateStatusText)
                         .font(.subheadline.bold())
-                    Text(assessment.advisoryHigh
-                         ? "Model memperkirakan cakupan rekonstruksi telah memenuhi target eksperimen. Verifikasi engineer tetap diperlukan sebelum menghentikan investigasi."
-                         : "Investigasi tambahan direkomendasikan.")
+                    Text(String(format:"Gate V2.1: p = %.4f · indikator eksperimental; DQN tetap dapat merekomendasikan CPT.", assessment.probability))
                         .font(.caption)
                     if let spacing = session.minimumRecommendationSpacingMeters {
                         Text(String(format:"Minimum Recommendation Spacing: %.1f m",spacing))
@@ -306,6 +304,8 @@ struct TerrainMapView: View {
                     }
                 }.frame(maxWidth:.infinity,alignment:.leading)
                     .padding(10).background(.thinMaterial,in:RoundedRectangle(cornerRadius:10))
+            } else {
+                Text(session.gateStatusText).font(.caption)
             }
             if session.dqnStatus == .recommending { ProgressView("DQN: menghitung lokasi CPT berikutnya…").font(.caption2) }
             if let detail = session.v42Detail {

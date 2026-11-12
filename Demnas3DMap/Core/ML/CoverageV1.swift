@@ -114,12 +114,18 @@ enum CoverageV1Pipeline {
 /// Keeps the existing risk-map renderer while sourcing its values from Uncertainty V3.
 enum UncertaintyV3MapFactory {
     static func makeMap(volume: ReconstructionVolume, service: UncertaintyV3Service) throws -> UncertaintyV2Map {
+        try makeMapAndGateSummary(volume: volume, service: service).map
+    }
+
+    static func makeMapAndGateSummary(volume: ReconstructionVolume, service: UncertaintyV3Service)
+        throws -> (map: UncertaintyV2Map, summary: GateV21VoxelSummary) {
         let grid = volume.grid
         let sites = (0..<grid.nx).flatMap { x in (0..<grid.ny).compactMap { y -> (Int, Int)? in
             (0..<grid.nz).contains { volume.observed[grid.index(x:x,y:y,z:$0)] } ? (x,y) : nil
         } }
         guard !sites.isEmpty else { throw MLIntegrationError.invalidInput("Uncertainty V3 needs measured CPT") }
         var values = [Float](repeating:.nan,count:grid.voxelCount)
+        var estimatedErrors = [Double]()
         var featureSeconds = 0.0, treeSeconds = 0.0
         for z in 0..<grid.nz {
             try Task.checkCancellation()
@@ -137,9 +143,18 @@ enum UncertaintyV3MapFactory {
             } }
             featureSeconds += Date().timeIntervalSince(featureStart)
             let treeStart = Date()
-            for (index,row) in rows { values[index] = Float(try service.predict(row)) }
+            for (index,row) in rows {
+                let prediction = try service.predict(row)
+                guard prediction.isFinite, prediction >= 0 else {
+                    throw MLIntegrationError.invalidInput("Uncertainty V3 nonfinite estimated error")
+                }
+                values[index] = Float(prediction)
+                estimatedErrors.append(prediction)
+            }
             treeSeconds += Date().timeIntervalSince(treeStart)
         }
-        return .init(grid:grid,estimatedErrorIc:values,featureSeconds:featureSeconds,treeSeconds:treeSeconds)
+        let map = UncertaintyV2Map(grid:grid,estimatedErrorIc:values,
+                                   featureSeconds:featureSeconds,treeSeconds:treeSeconds)
+        return (map, try GateV21VoxelSummary(estimatedErrors: estimatedErrors))
     }
 }

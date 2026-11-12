@@ -34,11 +34,18 @@ final class TerrainSession {
     var v42Detail: String?
     var v42QValue: Float?
     var v45Diagnostics: V45RunDiagnostics?
-    private(set) var investigationAssessment: CoverageV1Assessment?
-    private var coverageHistory = CoverageV1History()
+    private(set) var investigationAssessment: GateV21Assessment?
+    private var gateHistory = GateV21History()
+    private(set) var gateUnavailableReason: String?
+    var gateStatusText: String {
+        guard let assessment = investigationAssessment else { return "Belum cukup data untuk evaluasi" }
+        return assessment.indicatesSufficient
+            ? "Kriteria rekonstruksi terpenuhi (eksperimental)"
+            : "Investigasi tambahan direkomendasikan"
+    }
     private var assessmentInputKey: String?
     private var assessmentGeneration = 0
-    private var assessmentTask: Task<(ReconstructionVolume, CoverageV1Assessment, CoverageV1History), Error>?
+    private var assessmentTask: Task<ReconstructionVolume, Error>?
     var minimumRecommendationSpacingMeters: Double?
     private var v46Task: Task<V46Recommendation?, Error>?
     var rendererDiagnostics: RendererDiagnostics?
@@ -55,9 +62,13 @@ final class TerrainSession {
     var terrainRevision = 0
     var reconstructionError: String?
     var estimatedRisk: UncertaintyV2Map?
+    var bearingLayerResult: BearingLayerResult?
+    var bearingLayerError: String?
+    var bearingLayerLoading = false
+    private var bearingLayerTask: Task<BearingLayerResult, Error>?
     var estimatedRiskError: String?
     var estimatedRiskVersion = 0
-    private var uncertaintyTask: Task<UncertaintyV2Map, Error>?
+    private var uncertaintyTask: Task<(map: UncertaintyV2Map, summary: GateV21VoxelSummary), Error>?
     private var reconstructionTask: Task<TiledModelCResult, Error>?
     private var reconstructionInputKey: String?
     private var reconstructionGeneration = 0
@@ -74,6 +85,7 @@ final class TerrainSession {
             for p in project.boundary { try selection.add(p.coordinate) }
             try selection.finish()
             mesh = project.terrain; terrainRevision += 1; points = project.points; scenario = project.scenario
+            gateHistory = project.gateV21History ?? GateV21History()
             if let extent = try? MetricExtent(boundary: project.boundary, origin: project.terrain.origin) {
                 spatialResolutionMeters = AdaptiveGrid.automaticDisplayResolution(extent: extent)
             }
@@ -89,8 +101,8 @@ final class TerrainSession {
 
     private func refreshAssessmentIfNeeded() {
         let complete = points.filter(\.isComplete)
-        if complete.count == 0 || (coverageHistory.evaluations.last?.count ?? 0) > complete.count {
-            coverageHistory.reset()
+        if complete.count == 0 || (gateHistory.entries.last?.count ?? 0) > complete.count {
+            gateHistory.reset()
             investigationAssessment = nil
         }
         let key = UncertaintyV2Features.inputKey(points: complete, resolutionMeters: spatialResolutionMeters,
@@ -103,12 +115,14 @@ final class TerrainSession {
         v46Task?.cancel(); v46Task = nil
         dqnTask?.cancel(); v42Task?.cancel(); dqnTask = nil; v42Task = nil
         uncertaintyTask?.cancel(); estimatedRisk = nil; estimatedRiskError = nil; estimatedRiskVersion += 1
+        bearingLayerTask?.cancel(); bearingLayerTask = nil
+        bearingLayerResult = nil; bearingLayerError = nil; bearingLayerLoading = false
         reconstructionTask?.cancel(); reconstructionTask = nil
         reconstruction = nil; reconstructionTiles = []; reconstructionError = nil; reconstructionVersion += 1
         recommendation = nil; recommendationSource = .none
         dqnRecommendation = nil; dqnRecommendationSource = .none
         v42QValue = nil; v45Diagnostics = nil; dqnInfo = nil; dqnError = nil
-        investigationAssessment = nil
+        investigationAssessment = nil; gateUnavailableReason = nil
         minimumRecommendationSpacingMeters = nil
         guard let mesh, !complete.isEmpty else {
             reconstructionStatus = .unavailable; dqnStatus = .unavailable
@@ -116,27 +130,26 @@ final class TerrainSession {
         }
         let boundary = selection.coordinates.map { GeoPoint($0) }
         let resolution = spatialResolutionMeters
-        let history = coverageHistory
         #if DEBUG
-        print("[Coverage V1] CPT count=\(complete.count); preferred resolution=\(resolution) m")
-        print("[Coverage V1] bundle=\(Bundle.main.bundlePath)")
-        for name in ["CoverageV1", "UncertaintyV3"] {
-            print("[Coverage V1] resource \(name).json: \(Bundle.main.url(forResource: name, withExtension: "json")?.path ?? "MISSING")")
+        print("[Gate V2.1] CPT count=\(complete.count); preferred resolution=\(resolution) m")
+        print("[Gate V2.1] bundle=\(Bundle.main.bundlePath)")
+        for name in ["UncertaintyV3", "gate_v21_swift_parameters"] {
+            print("[Gate V2.1] resource \(name).json: \(Bundle.main.url(forResource: name, withExtension: "json")?.path ?? "MISSING")")
         }
-        print("[Coverage V1] resource DQN_V4_6_A.mlmodelc: \(Bundle.main.url(forResource: "DQN_V4_6_A", withExtension: "mlmodelc")?.path ?? "MISSING")")
+        print("[Gate V2.1] resource DQN_V4_6_A.mlmodelc: \(Bundle.main.url(forResource: "DQN_V4_6_A", withExtension: "mlmodelc")?.path ?? "MISSING")")
         #endif
         reconstructionStatus = .reconstructing; dqnStatus = .unavailable
-        v42Detail = "SchemaGAN V4.2 → Coverage V1 sedang dihitung."
-        let job = Task.detached(priority: .userInitiated) { () throws -> (ReconstructionVolume, CoverageV1Assessment, CoverageV1History) in
+        v42Detail = "SchemaGAN V4.2 sedang merekonstruksi Ic."
+        let job = Task.detached(priority: .userInitiated) { () throws -> ReconstructionVolume in
             var stage = "CPT/grid preprocessing"
             do {
             #if DEBUG
-            print("[Coverage V1] preparing SchemaGAN input")
+            print("[Gate V2.1] preparing SchemaGAN input")
             #endif
             let input = try V42Input.prepare(terrain: mesh, boundary: boundary, points: complete,
                                              preferredMeters: resolution)
             #if DEBUG
-            print("[Coverage V1] SchemaGAN input grid=\(input.nx)×\(input.ny)×\(input.nz); valid XY=\(input.validXY.filter { $0 }.count); observed voxels=\(input.observed.filter { $0 }.count)")
+            print("[Gate V2.1] SchemaGAN input grid=\(input.nx)×\(input.ny)×\(input.nz); valid XY=\(input.validXY.filter { $0 }.count); observed voxels=\(input.observed.filter { $0 }.count)")
             #endif
             stage = "SchemaGAN model load/inference"
             let schema = try V42SchemaGANService()
@@ -147,17 +160,12 @@ final class TerrainSession {
             #if DEBUG
             let validVoxelCount = volume.validXY.filter { $0 }.count * volume.grid.nz
             let observedValidCount = volume.observed.indices.filter { volume.observed[$0] }.count
-            print("[Coverage V1] SchemaGAN reconstruction succeeded; grid=\(volume.grid.nx)×\(volume.grid.ny)×\(volume.grid.nz); valid voxels=\(validVoxelCount); unobserved valid voxels=\(validVoxelCount - observedValidCount)")
+            print("[Gate V2.1] SchemaGAN reconstruction succeeded; grid=\(volume.grid.nx)×\(volume.grid.ny)×\(volume.grid.nz); valid voxels=\(validVoxelCount); unobserved valid voxels=\(validVoxelCount - observedValidCount)")
             #endif
-            stage = "CoverageV1.json load / voxel inference"
-            let coverage = try CoverageV1Service.bundled()
-            var updatedHistory = history
-            let assessment = try CoverageV1Pipeline.assess(volume: volume, nCPT: complete.count,
-                                                            service: coverage, history: &updatedHistory)
-            return (volume, assessment, updatedHistory)
+            return volume
             } catch {
                 #if DEBUG
-                print("[Coverage V1] stage=\(stage) FAILED: \(String(reflecting: error))")
+                print("[Gate V2.1] stage=\(stage) FAILED: \(String(reflecting: error))")
                 #endif
                 throw error
             }
@@ -165,20 +173,41 @@ final class TerrainSession {
         assessmentTask = job
         Task {
             do {
-                let (volume, assessment, updatedHistory) = try await job.value
+                let volume = try await job.value
                 guard !job.isCancelled, generation == assessmentGeneration else { return }
-                coverageHistory = updatedHistory
-                investigationAssessment = assessment
                 minimumRecommendationSpacingMeters = V46FeatureAdapter.recommendationSpacing(grid: volume.grid)
                 reconstruction = volume; reconstructionTiles = [volume]
                 reconstructionVersion += 1; reconstructionStatus = .ready
                 reconstructionError = nil
                 reconstructionSummary = "SchemaGAN V4.2 Flexible: Ic 3D pada grid \(volume.grid.nx) × \(volume.grid.ny) × \(volume.grid.nz); nilai CPT terukur dipertahankan."
-                if assessment.advisoryHigh {
-                    v42Detail = "Kecukupan Investigasi: Tinggi. Verifikasi engineer tetap diperlukan; DQN dapat menyarankan titik tambahan."
-                } else {
-                    v42Detail = "Kecukupan Investigasi: Belum Memadai. Investigasi tambahan direkomendasikan."
+                bearingLayerLoading = true
+                #if DEBUG
+                print("[Bearing Layer] starting: CPT=\(complete.count), grid=\(volume.grid.nx)×\(volume.grid.ny)×\(volume.grid.nz), spacing=\(volume.grid.spacingMeters)×\(volume.grid.northSpacingMeters)×\(volume.grid.depthSpacingMeters) m")
+                #endif
+                let bearingJob = Task.detached(priority: .utility) {
+                    try BearingLayerPipeline.run(volume: volume, points: complete, boundary: boundary)
                 }
+                bearingLayerTask = bearingJob
+                Task {
+                    do {
+                        let result = try await bearingJob.value
+                        guard !bearingJob.isCancelled, generation == assessmentGeneration else { return }
+                        bearingLayerResult = result
+                        bearingLayerError = nil; bearingLayerLoading = false
+                        #if DEBUG
+                        print("[Bearing Layer] completed: candidates=\(result.depthsYX.compactMap { $0 }.count), validXY=\(volume.validXY.filter { $0 }.count)")
+                        #endif
+                    } catch is CancellationError { return }
+                    catch {
+                        guard generation == assessmentGeneration else { return }
+                        bearingLayerResult = nil
+                        bearingLayerError = error.localizedDescription; bearingLayerLoading = false
+                        #if DEBUG
+                        print("[Bearing Layer] unavailable: \(String(reflecting: error))")
+                        #endif
+                    }
+                }
+                v42Detail = "SchemaGAN V4.2 siap; indikator Gate V2.1 sedang dihitung."
                     dqnStatus = .recommending
                     let dqnJob = Task.detached(priority: .userInitiated) {
                         try await V46RecommendationService.recommend(volume: volume, terrain: mesh,
@@ -187,9 +216,7 @@ final class TerrainSession {
                     }
                     v46Task = dqnJob
                     do {
-                        let result = try await CoverageV1RecommendationPolicy.next(assessment: assessment) {
-                            try await dqnJob.value
-                        }
+                        let result = try await dqnJob.value
                         guard !dqnJob.isCancelled, generation == assessmentGeneration else { return }
                         if let result {
                             dqnRecommendation = result.coordinate
@@ -216,27 +243,57 @@ final class TerrainSession {
                     }
                 let riskJob = Task.detached(priority: .utility) {
                     let model = try UncertaintyV3Service.bundled()
-                    return try UncertaintyV3MapFactory.makeMap(volume: volume, service: model)
+                    return try UncertaintyV3MapFactory.makeMapAndGateSummary(volume: volume, service: model)
                 }
                 uncertaintyTask = riskJob
                 Task {
                     do {
-                        let risk = try await riskJob.value
+                        let (risk, summary) = try await riskJob.value
                         guard !riskJob.isCancelled, generation == assessmentGeneration else { return }
                         estimatedRisk = risk; estimatedRiskVersion += 1
+                        do {
+                            let gate = try SufficiencyGateV21.bundled()
+                            let prior = Array(complete.dropLast())
+                            let previousKey = prior.isEmpty ? nil : UncertaintyV2Features.inputKey(
+                                points: prior, resolutionMeters: resolution, boundary: boundary)
+                            investigationAssessment = try gateHistory.evaluate(
+                                count: complete.count, stateKey: key, previousStateKey: previousKey,
+                                gridSignature: "\(volume.grid.nx):\(volume.grid.ny):\(volume.grid.nz):\(volume.grid.spacingMeters):\(volume.grid.northSpacingMeters):\(volume.grid.depthSpacingMeters)",
+                                summary: summary, gate: gate)
+                            persist()
+                            gateUnavailableReason = nil
+                            v42Detail = gateStatusText + ". Gate V2.1 bersifat eksperimental; DQN tetap tersedia."
+                        } catch {
+                            investigationAssessment = nil
+                            gateUnavailableReason = error.localizedDescription
+                            persist()
+                            v42Detail = "Belum cukup data untuk evaluasi. DQN tetap tersedia."
+                            #if DEBUG
+                            print("[Gate V2.1] unavailable: \(error)")
+                            #endif
+                        }
                     } catch is CancellationError { return }
-                    catch { if generation == assessmentGeneration { estimatedRiskError = error.localizedDescription } }
+                    catch {
+                        if generation == assessmentGeneration {
+                            estimatedRiskError = error.localizedDescription
+                            gateUnavailableReason = error.localizedDescription
+                            investigationAssessment = nil
+                            v42Detail = "Belum cukup data untuk evaluasi. DQN tetap tersedia."
+                        }
+                    }
                 }
             } catch is CancellationError { return }
             catch {
                 guard !job.isCancelled, generation == assessmentGeneration else { return }
                 reconstructionStatus = .error; reconstructionError = error.localizedDescription
+                bearingLayerError = "Rekonstruksi Ic SchemaGAN belum tersedia: \(error.localizedDescription)"
                 dqnStatus = .unavailable; dqnError = "Rekomendasi DQN belum tersedia."
                 #if DEBUG
-                print("[Coverage V1] ASSESSMENT UNAVAILABLE: \(String(reflecting: error))")
-                print("[Coverage V1] DQN V4.6-A blocked because coverage assessment is unavailable")
+                print("[Gate V2.1] ASSESSMENT UNAVAILABLE: \(String(reflecting: error))")
+                print("[Gate V2.1] reconstruction unavailable; DQN V4.6-A blocked")
                 #endif
-                v42Detail = "Predicted Coverage belum tersedia; DQN V4.6-A tidak dijalankan."
+                gateUnavailableReason = error.localizedDescription
+                v42Detail = "Belum cukup data untuk evaluasi. Rekonstruksi tidak tersedia."
             }
         }
     }
@@ -307,7 +364,7 @@ final class TerrainSession {
     func persist() {
         guard let mesh else { return }
         do {
-            let project = InvestigationProject(boundary: selection.coordinates.map { GeoPoint($0) }, terrain: mesh, points: points, scenario: scenario, spatialResolutionMeters: spatialResolutionMeters)
+            let project = InvestigationProject(boundary: selection.coordinates.map { GeoPoint($0) }, terrain: mesh, points: points, scenario: scenario, spatialResolutionMeters: spatialResolutionMeters, gateV21History: gateHistory)
             try FileManager.default.createDirectory(at: projectURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             try project.encoded().write(to: projectURL, options: .atomic)
             savedAt = Date()
@@ -477,8 +534,9 @@ final class TerrainSession {
         mesh = result; terrainRevision += 1; points = []; recommendation = nil; placingCPT = false
         assessmentTask?.cancel(); assessmentTask = nil; assessmentInputKey = nil; assessmentGeneration += 1
         v46Task?.cancel(); v46Task = nil
-        coverageHistory.reset(); investigationAssessment = nil; minimumRecommendationSpacingMeters = nil
+        gateHistory.reset(); investigationAssessment = nil; gateUnavailableReason = nil; minimumRecommendationSpacingMeters = nil
         reconstructionTask?.cancel(); uncertaintyTask?.cancel(); estimatedRisk = nil; estimatedRiskError = nil; estimatedRiskVersion += 1; reconstructionInputKey = nil; reconstruction = nil; reconstructionTiles = []; reconstructionSummary = nil; reconstructionVersion += 1
+        bearingLayerTask?.cancel(); bearingLayerTask = nil; bearingLayerResult = nil; bearingLayerError = nil; bearingLayerLoading = false
         dqnTask?.cancel(); v42Task?.cancel(); v42Task = nil; dqnInputKey = nil; dqnStatus = .unavailable; dqnError = nil; dqnInfo = nil; v42Detail = nil; v42QValue = nil
         dqnRecommendation = nil; dqnRecommendationSource = .none
         refreshInvestigation(); persist()
@@ -487,12 +545,13 @@ final class TerrainSession {
     func reset() {
         assessmentTask?.cancel(); assessmentTask = nil; assessmentInputKey = nil; assessmentGeneration += 1
         v46Task?.cancel(); v46Task = nil
-        coverageHistory.reset(); investigationAssessment = nil; minimumRecommendationSpacingMeters = nil
+        gateHistory.reset(); investigationAssessment = nil; gateUnavailableReason = nil; minimumRecommendationSpacingMeters = nil
         selection.reset(); mesh = nil; terrainRevision += 1; drawing = false; placingCPT = false; spatialResolutionMeters = 1
         points = []; recommendation = nil; recommendationSource = .none; savedAt = nil; revision += 1
         dqnTask?.cancel(); v42Task?.cancel(); dqnTask = nil; v42Task = nil; dqnInputKey = nil; dqnError = nil; dqnInfo = nil; v42Detail = nil; v42QValue = nil; dqnStatus = .unavailable
         dqnRecommendation = nil; dqnRecommendationSource = .none
         reconstructionTask?.cancel(); uncertaintyTask?.cancel(); uncertaintyTask = nil; estimatedRisk = nil; estimatedRiskError = nil; estimatedRiskVersion += 1; reconstructionTask = nil; reconstructionInputKey = nil
+        bearingLayerTask?.cancel(); bearingLayerTask = nil; bearingLayerResult = nil; bearingLayerError = nil; bearingLayerLoading = false
         reconstruction = nil; reconstructionTiles = []; reconstructionSummary = nil; reconstructionVersion += 1; reconstructionError = nil; reconstructionStatus = .unavailable
         if let importedDEM { try? FileManager.default.removeItem(at: importedDEM.directory); self.importedDEM = nil }
         do {
@@ -506,6 +565,7 @@ final class TerrainSession {
         importing?.cancel()
         reconstructionTask?.cancel()
         uncertaintyTask?.cancel()
+        bearingLayerTask?.cancel()
         dqnTask?.cancel()
         v42Task?.cancel()
         if let importedDEM { try? FileManager.default.removeItem(at: importedDEM.directory) }

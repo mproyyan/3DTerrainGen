@@ -1,0 +1,50 @@
+{
+  "version": "QCFS_CoreML_V2_Flexible",
+  "source_model": "QC-FS V3-D frozen",
+  "source_sha256": "21eaa45f303b24437f74f0ffb99d668d369814de9ffef69ac6d73467cf3b7255",
+  "input_order": "B,C,Z,Y,X",
+  "input_channels": 9,
+  "min_spatial_zyx": [
+    8,
+    16,
+    16
+  ],
+  "max_spatial_zyx": [
+    32,
+    128,
+    128
+  ],
+  "precision": "FLOAT32",
+  "minimum_ios": 17,
+  "tested_shapes": [
+    {
+      "name": "original_grid_3_cpt",
+      "shape": [
+        1,
+        9,
+        24,
+        24,
+        24
+      ],
+      "qc_max_diff": 7.152557373046875e-07,
+      "fs_max_diff": 6.258487701416016e-07,
+      "passed": true
+    },
+    {
+      "name": "project_grid_3_cpt",
+      "shape": [
+        1,
+        9,
+        16,
+        96,
+        84
+      ],
+      "qc_max_diff": 1.1920928955078125e-06,
+      "fs_max_diff": 7.748603820800781e-07,
+      "passed": true
+    }
+  ],
+  "runtime_parity_passed": true,
+  "accuracy_on_new_grids_validated": false,
+  "field_validated": false
+}

@@ -24,6 +24,7 @@ struct Terrain3DView: View {
     @State private var inspectionMessage: String?
     @State private var depthScale: Float = 1
     @State private var showInvestigation = false
+    @State private var showBearingLayer = false
     @State private var buildingLayers = false
     @State private var layerFailure: String?
 
@@ -251,6 +252,7 @@ struct Terrain3DView: View {
         .toolbarBackground(.visible, for: .navigationBar)
         .toolbar {
             ToolbarItemGroup(placement:.topBarTrailing) {
+                Button("Bearing Layer", systemImage:"square.grid.3x3.fill") { showBearingLayer = true }
                 Button("Investigasi", systemImage: "list.bullet.clipboard") { showInvestigation = true }
                 Button("Lihat seluruh area",systemImage:"arrow.counterclockwise") { resetID += 1 }
                 Button("Terrain details",systemImage:"info.circle") { showDetails = true }
@@ -258,6 +260,9 @@ struct Terrain3DView: View {
         }
         .sheet(isPresented:$showDetails) { details }
         .sheet(isPresented:$showInvestigation) { CPTWorkspaceView(session: session) }
+        .navigationDestination(isPresented:$showBearingLayer) {
+            BearingLayerView(session: session)
+        }
         .sheet(item:$selectedProfile) { profile in verticalProfilePanel(profile) }
         .alert("Profil belum tersedia",isPresented:Binding(get:{inspectionMessage != nil},set:{if !$0 { inspectionMessage = nil }})) {
             Button("OK",role:.cancel) { inspectionMessage = nil }

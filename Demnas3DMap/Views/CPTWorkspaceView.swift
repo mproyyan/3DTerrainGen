@@ -71,8 +71,11 @@ struct CPTWorkspaceView: View {
                     Text("Rekonstruksi 3D: \(session.reconstructionStatus.rawValue)")
                     if let error = session.reconstructionError { Text(error).foregroundStyle(.orange) }
                     if let advisory = session.investigationAssessment {
-                        Text(String(format:"Predicted Coverage: %.1f%%",advisory.predictedCoverage * 100))
-                        Text(advisory.advisoryHigh ? "Kecukupan Investigasi: Tinggi" : "Kecukupan Investigasi: Belum Memadai")
+                        Text(String(format:"Predicted Coverage: %.1f%%",advisory.summary.predictedCoverage * 100))
+                        Text(session.gateStatusText)
+                        Text(String(format:"Gate V2.1: p = %.4f (eksperimental)",advisory.probability))
+                    } else {
+                        Text(session.gateStatusText)
                     }
                     if let spacing = session.minimumRecommendationSpacingMeters {
                         Text(String(format:"Minimum Recommendation Spacing: %.1f m",spacing))

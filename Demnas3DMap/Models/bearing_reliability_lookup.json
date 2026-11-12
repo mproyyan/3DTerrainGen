@@ -1,0 +1,263 @@
+{
+  "version": "BearingReliability_V1",
+  "criteria": {
+    "qc_min_mpa": 10.0,
+    "ic_max": 2.2,
+    "min_thickness_m": 1.0
+  },
+  "calibration_volumes": [
+    0,
+    349
+  ],
+  "holdout_volumes": [
+    350,
+    499
+  ],
+  "high_risk_threshold": 0.25,
+  "high_risk_threshold_is_heuristic": true,
+  "depth_p90_is_conditional_on_true_positive": true,
+  "status": "Experimental synthetic calibration",
+  "field_validated": false,
+  "lookup": [
+    {
+      "cpt": 1,
+      "distance_min_m": 0.0,
+      "distance_max_m": 3.0,
+      "samples": 7590,
+      "true_positives": 1548,
+      "estimated_detection_risk": 0.18168642951251646,
+      "conditional_depth_p90_m": 5.0,
+      "supported": true
+    },
+    {
+      "cpt": 1,
+      "distance_min_m": 3.0,
+      "distance_max_m": 6.0,
+      "samples": 22499,
+      "true_positives": 2987,
+      "estimated_detection_risk": 0.25041112938352816,
+      "conditional_depth_p90_m": 6.0,
+      "supported": true
+    },
+    {
+      "cpt": 1,
+      "distance_min_m": 6.0,
+      "distance_max_m": 12.0,
+      "samples": 62741,
+      "true_positives": 5394,
+      "estimated_detection_risk": 0.2834828899762516,
+      "conditional_depth_p90_m": 6.0,
+      "supported": true
+    },
+    {
+      "cpt": 1,
+      "distance_min_m": 12.0,
+      "distance_max_m": null,
+      "samples": 108420,
+      "true_positives": 6492,
+      "estimated_detection_risk": 0.27897066961815165,
+      "conditional_depth_p90_m": 6.5,
+      "supported": true
+    },
+    {
+      "cpt": 3,
+      "distance_min_m": 0.0,
+      "distance_max_m": 3.0,
+      "samples": 21909,
+      "true_positives": 3997,
+      "estimated_detection_risk": 0.18462732210507096,
+      "conditional_depth_p90_m": 4.5,
+      "supported": true
+    },
+    {
+      "cpt": 3,
+      "distance_min_m": 3.0,
+      "distance_max_m": 6.0,
+      "samples": 55720,
+      "true_positives": 5732,
+      "estimated_detection_risk": 0.24536970567121322,
+      "conditional_depth_p90_m": 5.5,
+      "supported": true
+    },
+    {
+      "cpt": 3,
+      "distance_min_m": 6.0,
+      "distance_max_m": 12.0,
+      "samples": 88493,
+      "true_positives": 5084,
+      "estimated_detection_risk": 0.277649079588216,
+      "conditional_depth_p90_m": 6.0,
+      "supported": true
+    },
+    {
+      "cpt": 3,
+      "distance_min_m": 12.0,
+      "distance_max_m": null,
+      "samples": 34428,
+      "true_positives": 847,
+      "estimated_detection_risk": 0.29409201812478214,
+      "conditional_depth_p90_m": 5.5,
+      "supported": true
+    },
+    {
+      "cpt": 5,
+      "distance_min_m": 0.0,
+      "distance_max_m": 3.0,
+      "samples": 34701,
+      "true_positives": 6737,
+      "estimated_detection_risk": 0.17627734071064236,
+      "conditional_depth_p90_m": 4.0,
+      "supported": true
+    },
+    {
+      "cpt": 5,
+      "distance_min_m": 3.0,
+      "distance_max_m": 6.0,
+      "samples": 75569,
+      "true_positives": 7887,
+      "estimated_detection_risk": 0.24712514390821633,
+      "conditional_depth_p90_m": 5.5,
+      "supported": true
+    },
+    {
+      "cpt": 5,
+      "distance_min_m": 6.0,
+      "distance_max_m": 12.0,
+      "samples": 76926,
+      "true_positives": 4772,
+      "estimated_detection_risk": 0.26975274939552296,
+      "conditional_depth_p90_m": 6.0,
+      "supported": true
+    },
+    {
+      "cpt": 5,
+      "distance_min_m": 12.0,
+      "distance_max_m": null,
+      "samples": 12654,
+      "true_positives": 584,
+      "estimated_detection_risk": 0.2654496601865023,
+      "conditional_depth_p90_m": 6.0,
+      "supported": true
+    },
+    {
+      "cpt": 8,
+      "distance_min_m": 0.0,
+      "distance_max_m": 3.0,
+      "samples": 52478,
+      "true_positives": 10046,
+      "estimated_detection_risk": 0.16803231830481344,
+      "conditional_depth_p90_m": 4.0,
+      "supported": true
+    },
+    {
+      "cpt": 8,
+      "distance_min_m": 3.0,
+      "distance_max_m": 6.0,
+      "samples": 89716,
+      "true_positives": 8770,
+      "estimated_detection_risk": 0.24549690133309554,
+      "conditional_depth_p90_m": 5.0,
+      "supported": true
+    },
+    {
+      "cpt": 8,
+      "distance_min_m": 6.0,
+      "distance_max_m": 12.0,
+      "samples": 52604,
+      "true_positives": 2586,
+      "estimated_detection_risk": 0.2783818721009809,
+      "conditional_depth_p90_m": 5.0,
+      "supported": true
+    },
+    {
+      "cpt": 8,
+      "distance_min_m": 12.0,
+      "distance_max_m": null,
+      "samples": 4002,
+      "true_positives": 114,
+      "estimated_detection_risk": 0.2596201899050475,
+      "conditional_depth_p90_m": 3.8500000000000014,
+      "supported": true
+    },
+    {
+      "cpt": 16,
+      "distance_min_m": 0.0,
+      "distance_max_m": 3.0,
+      "samples": 90160,
+      "true_positives": 16448,
+      "estimated_detection_risk": 0.1741348713398403,
+      "conditional_depth_p90_m": 4.0,
+      "supported": true
+    },
+    {
+      "cpt": 16,
+      "distance_min_m": 3.0,
+      "distance_max_m": 6.0,
+      "samples": 88042,
+      "true_positives": 8569,
+      "estimated_detection_risk": 0.2379432543558756,
+      "conditional_depth_p90_m": 4.5,
+      "supported": true
+    },
+    {
+      "cpt": 16,
+      "distance_min_m": 6.0,
+      "distance_max_m": 12.0,
+      "samples": 17637,
+      "true_positives": 828,
+      "estimated_detection_risk": 0.26932017916879286,
+      "conditional_depth_p90_m": 4.5,
+      "supported": true
+    },
+    {
+      "cpt": 16,
+      "distance_min_m": 12.0,
+      "distance_max_m": null,
+      "samples": 161,
+      "true_positives": 2,
+      "estimated_detection_risk": null,
+      "conditional_depth_p90_m": null,
+      "supported": false
+    },
+    {
+      "cpt": 32,
+      "distance_min_m": 0.0,
+      "distance_max_m": 3.0,
+      "samples": 134158,
+      "true_positives": 22760,
+      "estimated_detection_risk": 0.17178252508236558,
+      "conditional_depth_p90_m": 3.0,
+      "supported": true
+    },
+    {
+      "cpt": 32,
+      "distance_min_m": 3.0,
+      "distance_max_m": 6.0,
+      "samples": 53694,
+      "true_positives": 5123,
+      "estimated_detection_risk": 0.2410138935449026,
+      "conditional_depth_p90_m": 4.5,
+      "supported": true
+    },
+    {
+      "cpt": 32,
+      "distance_min_m": 6.0,
+      "distance_max_m": 12.0,
+      "samples": 2543,
+      "true_positives": 119,
+      "estimated_detection_risk": 0.26228863546991743,
+      "conditional_depth_p90_m": 5.5,
+      "supported": true
+    },
+    {
+      "cpt": 32,
+      "distance_min_m": 12.0,
+      "distance_max_m": null,
+      "samples": 5,
+      "true_positives": 0,
+      "estimated_detection_risk": null,
+      "conditional_depth_p90_m": null,
+      "supported": false
+    }
+  ]
+}

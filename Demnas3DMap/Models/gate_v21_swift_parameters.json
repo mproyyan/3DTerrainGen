@@ -1,0 +1,54 @@
+{
+  "model_name": "SufficiencyGate_V2_1",
+  "model_type": "StandardScaler_LogisticRegression_Platt",
+  "features": [
+    "predicted_coverage",
+    "n_cpt",
+    "estimated_mean_bound",
+    "estimated_p90_bound",
+    "delta_predicted",
+    "delta_p90"
+  ],
+  "scaler": {
+    "mean": [
+      0.5485578530392796,
+      8.5,
+      0.13488360197933272,
+      0.18025955892079273,
+      0.016277230412342497,
+      -0.0036283756107650966
+    ],
+    "scale": [
+      0.3474683442718678,
+      4.6097722286464435,
+      0.05418335615372476,
+      0.06746987926179666,
+      0.031391830700551494,
+      0.014729267081583857
+    ]
+  },
+  "classifier": {
+    "coef": [
+      0.8824647929284982,
+      0.03225981631481744,
+      -3.921367150612398,
+      0.7539464052060016,
+      -0.029716150643693068,
+      -0.049720990706117754
+    ],
+    "intercept": 0.3266056174229834
+  },
+  "platt": {
+    "coef": 1.0908133511639786,
+    "intercept": 0.491117521945733,
+    "input": "logit(raw_probability)"
+  },
+  "decision": {
+    "probability_threshold": 0.995,
+    "minimum_cpt": 5,
+    "actual_coverage_target": 0.9,
+    "ic_tolerance": 0.15,
+    "maximum_evaluated_cpt": 16,
+    "auto_stop_approved": false
+  }
+}

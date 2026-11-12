@@ -281,6 +281,7 @@ struct InvestigationProject: Codable, Sendable {
     let points: [CPTPoint]
     let scenario: InvestigationScenario
     var spatialResolutionMeters: Double? = nil
+    var gateV21History: GateV21History? = nil
 
     func encoded() throws -> Data {
         let encoder = JSONEncoder()
